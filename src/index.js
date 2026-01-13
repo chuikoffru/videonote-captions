@@ -8,6 +8,10 @@ const { generateVideo } = require('./services/videoService');
 const { downloadAvatar } = require('./utils/avatarUtils');
 
 const bot = new Bot(process.env.BOT_TOKEN);
+const pendingInvoices = new Map();
+
+// Хранилище для ожидающих оплаты file_id (чтобы не превышать лимит payload и для валидации)
+// Ключ: unique_payload_id, Значение: file_id
 
 // Обработчик команды /start
 bot.command('start', async (ctx) => {
@@ -31,22 +35,35 @@ bot.on('message:forward_origin', async (ctx) => {
 
 // Обработчик pre_checkout_query (необходим для оплаты)
 bot.on('pre_checkout_query', async (ctx) => {
+  const payload = ctx.preCheckoutQuery.invoice_payload;
+  // Проверяем, есть ли такой заказ в памяти
+  if (!pendingInvoices.has(payload)) {
+    return ctx.answerPreCheckoutQuery(false, {
+      error_message: '❌ Заказ устарел или бот был перезагружен. Пожалуйста, отправьте сообщение снова.'
+    });
+  }
   await ctx.answerPreCheckoutQuery(true);
 });
 
 // Обработчик успешного платежа
 bot.on('message:successful_payment', async (ctx) => {
-  const fileId = ctx.message.successful_payment.invoice_payload;
+  const payload = ctx.message.successful_payment.invoice_payload;
+
+  const fileId = pendingInvoices.get(payload);
   if (!fileId) {
-    return ctx.reply('❌ Ошибка: не найден ID файла в платеже.');
+    return ctx.reply('❌ Ошибка: файл не найден (возможно, бот был перезагружен). Перешлите сообщение снова.');
   }
 
-  // Создаем объект voice с file_id (длительность не важна для повторной обработки с флагом isPaid)
+  // Удаляем из памяти после успешной оплаты
+  pendingInvoices.delete(payload);
+
+  // Создаем объект voice с file_id
   const voice = {
     file_id: fileId,
     duration: 0
   };
 
+  await ctx.reply('✅ Оплата прошла успешно! Начинаю генерацию видео.');
   await handleVoiceMessage(ctx, voice, true);
 });
 
@@ -55,18 +72,21 @@ async function handleVoiceMessage(ctx, voice, isPaid = false) {
   if (!isPaid && voice.duration > 60) {
     const duration = voice.duration;
     // Расчет стоимости: 10 звезд за каждые 60 секунд (округление вверх)
-    // Пример: 159 сек -> ceil(159/60) = 3 -> 3 * 10 = 30 звезд
     const price = Math.ceil(duration / 60) * 10;
 
-    await ctx.api.sendInvoice(
-      ctx.chat.id,
-      'Длинное голосовое сообщение',
-      `Хочешь получить видео, заплати ${price} Telegram Stars`,
-      voice.file_id, // payload (сохраняем file_id)
-      '', // provider_token (пусто для XTR)
-      'XTR', // currency
-      [{ label: 'Видео', amount: price }]
-    );
+    // Генерируем уникальный ID для payload
+    const payloadId = `${ctx.from.id}_${Date.now()}`;
+    pendingInvoices.set(payloadId, voice.file_id);
+
+    await ctx.api.sendInvoice({
+      chat_id: ctx.chat.id,
+      title: 'Длинное голосовое сообщение',
+      description: `Хочешь получить видео, заплати ${price} Telegram Stars`,
+      payload: payloadId,
+      provider_token: '',
+      currency: 'XTR',
+      prices: [{ label: 'Видео', amount: price }]
+    });
     return;
   }
 
