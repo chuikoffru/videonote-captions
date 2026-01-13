@@ -81,7 +81,7 @@ async function handleVoiceMessage(ctx, voice, isPaid = false) {
     await ctx.api.sendInvoice(
       ctx.chat.id,
       'Длинное голосовое сообщение',
-      `Хочешь получить видео, заплати ${price} Telegram Stars`,
+      `Первые 60 секунд — бесплатно! Каждые следующие 60 секунд — 10 звезд. Стоимость твоего видео ${price} Telegram Stars`,
       payloadId, // payload
       'XTR', // currency
       [{ label: 'Видео', amount: price }], // prices
