@@ -4,7 +4,13 @@ services:
     restart: unless-stopped
     volumes:
       - ./temp:/app/temp
-      - ./data:/app/data
+      - data:/app/data
     env_file:
       - .env
 
+volumes:
+  data:
+
+networks:
+  dokploy-network:
+    external: true
