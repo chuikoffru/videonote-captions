@@ -78,15 +78,15 @@ async function handleVoiceMessage(ctx, voice, isPaid = false) {
     const payloadId = `${ctx.from.id}_${Date.now()}`;
     pendingInvoices.set(payloadId, voice.file_id);
 
-    await ctx.api.sendInvoice({
-      chat_id: ctx.chat.id,
-      title: 'Длинное голосовое сообщение',
-      description: `Хочешь получить видео, заплати ${price} Telegram Stars`,
-      payload: payloadId,
-      provider_token: '',
-      currency: 'XTR',
-      prices: [{ label: 'Видео', amount: price }]
-    });
+    await ctx.api.sendInvoice(
+      ctx.chat.id,
+      'Длинное голосовое сообщение',
+      `Хочешь получить видео, заплати ${price} Telegram Stars`,
+      payloadId, // payload
+      'XTR', // currency
+      [{ label: 'Видео', amount: price }], // prices
+      { provider_token: '' } // options
+    );
     return;
   }
 
