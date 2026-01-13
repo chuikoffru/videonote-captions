@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Bot } = require('grammy');
+const { Bot, InputFile } = require('grammy');
 const fs = require('fs').promises;
 const path = require('path');
 const { downloadAudio } = require('./services/audioService');
@@ -71,7 +71,7 @@ async function handleVoiceMessage(ctx, voice) {
       statusMsg.message_id,
       '📤 Отправляю видео...'
     );
-    await ctx.replyWithVideo(videoPath);
+    await ctx.replyWithVideo(new InputFile(videoPath));
     
     // Удаляем сообщение о статусе
     await ctx.api.deleteMessage(ctx.chat.id, statusMsg.message_id);
