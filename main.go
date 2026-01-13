@@ -58,6 +58,15 @@ func defaultHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	cfg := config.Load()
 	h := handlers.NewHandler(cfg)
 
+	// Логируем входящие обновления для отладки
+	if update.Message != nil {
+		log.Printf("defaultHandler: Message received, has Voice: %v, has SuccessfulPayment: %v",
+			update.Message.Voice != nil, update.Message.SuccessfulPayment != nil)
+	}
+	if update.PreCheckoutQuery != nil {
+		log.Printf("defaultHandler: PreCheckoutQuery received")
+	}
+
 	// Обрабатываем разные типы обновлений
 	if update.Message != nil {
 		if update.Message.Voice != nil {

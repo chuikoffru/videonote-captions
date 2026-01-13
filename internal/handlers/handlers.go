@@ -80,8 +80,10 @@ func (h *Handler) PreCheckoutHandler(ctx context.Context, b *bot.Bot, update *mo
 	}
 
 	payload := update.PreCheckoutQuery.InvoicePayload
+	log.Printf("PreCheckoutQuery received, payload: %s", payload)
 
 	if _, ok := PendingInvoices.Load(payload); !ok {
+		log.Printf("PreCheckoutQuery: payload not found in PendingInvoices")
 		b.AnswerPreCheckoutQuery(ctx, &bot.AnswerPreCheckoutQueryParams{
 			PreCheckoutQueryID: update.PreCheckoutQuery.ID,
 			OK:                 false,
@@ -90,6 +92,7 @@ func (h *Handler) PreCheckoutHandler(ctx context.Context, b *bot.Bot, update *mo
 		return
 	}
 
+	log.Printf("PreCheckoutQuery: payload found, answering OK")
 	b.AnswerPreCheckoutQuery(ctx, &bot.AnswerPreCheckoutQueryParams{
 		PreCheckoutQueryID: update.PreCheckoutQuery.ID,
 		OK:                 true,
@@ -98,14 +101,19 @@ func (h *Handler) PreCheckoutHandler(ctx context.Context, b *bot.Bot, update *mo
 
 // SuccessfulPaymentHandler обрабатывает успешный платёж
 func (h *Handler) SuccessfulPaymentHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	log.Printf("SuccessfulPaymentHandler called")
+
 	if update.Message == nil || update.Message.SuccessfulPayment == nil {
+		log.Printf("SuccessfulPaymentHandler: no SuccessfulPayment in message")
 		return
 	}
 
 	payload := update.Message.SuccessfulPayment.InvoicePayload
+	log.Printf("SuccessfulPayment received, payload: %s", payload)
 
 	value, ok := PendingInvoices.Load(payload)
 	if !ok {
+		log.Printf("SuccessfulPayment: payload not found in PendingInvoices")
 		b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: update.Message.Chat.ID,
 			Text:   "❌ Ошибка: файл не найден (возможно, бот был перезагружен). Перешлите сообщение снова.",
@@ -113,6 +121,7 @@ func (h *Handler) SuccessfulPaymentHandler(ctx context.Context, b *bot.Bot, upda
 		return
 	}
 
+	log.Printf("SuccessfulPayment: payload found, starting video generation")
 	orderData := value.(OrderData)
 	PendingInvoices.Delete(payload)
 
@@ -143,6 +152,8 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 		price := ((duration / 60) + 1) * 10 // Округление вверх
 
 		payloadID := fmt.Sprintf("%d_%d", msg.From.ID, time.Now().UnixNano())
+
+		log.Printf("Creating invoice with payloadID: %s, fileID: %s", payloadID, voice.FileID)
 
 		PendingInvoices.Store(payloadID, OrderData{
 			FileID: voice.FileID,
