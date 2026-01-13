@@ -29,7 +29,47 @@ bot.on('message:forward_origin', async (ctx) => {
   }
 });
 
-async function handleVoiceMessage(ctx, voice) {
+// Обработчик pre_checkout_query (необходим для оплаты)
+bot.on('pre_checkout_query', async (ctx) => {
+  await ctx.answerPreCheckoutQuery(true);
+});
+
+// Обработчик успешного платежа
+bot.on('message:successful_payment', async (ctx) => {
+  const fileId = ctx.message.successful_payment.invoice_payload;
+  if (!fileId) {
+    return ctx.reply('❌ Ошибка: не найден ID файла в платеже.');
+  }
+
+  // Создаем объект voice с file_id (длительность не важна для повторной обработки с флагом isPaid)
+  const voice = {
+    file_id: fileId,
+    duration: 0
+  };
+
+  await handleVoiceMessage(ctx, voice, true);
+});
+
+async function handleVoiceMessage(ctx, voice, isPaid = false) {
+  // Проверяем длительность и оплату
+  if (!isPaid && voice.duration > 60) {
+    const duration = voice.duration;
+    // Расчет стоимости: 10 звезд за каждые 60 секунд (округление вверх)
+    // Пример: 159 сек -> ceil(159/60) = 3 -> 3 * 10 = 30 звезд
+    const price = Math.ceil(duration / 60) * 10;
+
+    await ctx.api.sendInvoice(
+      ctx.chat.id,
+      'Длинное голосовое сообщение',
+      `Хочешь получить видео, заплати ${price} Telegram Stars`,
+      voice.file_id, // payload (сохраняем file_id)
+      '', // provider_token (пусто для XTR)
+      'XTR', // currency
+      [{ label: 'Видео', amount: price }]
+    );
+    return;
+  }
+
   const statusMsg = await ctx.reply('⏳ Обрабатываю голосовое сообщение...');
 
   try {
