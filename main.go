@@ -5,8 +5,10 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 
 	"telegram-voice-video-bot/internal/config"
+	"telegram-voice-video-bot/internal/database"
 	"telegram-voice-video-bot/internal/handlers"
 
 	"github.com/go-telegram/bot"
@@ -21,12 +23,19 @@ func main() {
 		log.Fatal("BOT_TOKEN is required")
 	}
 
+	// Инициализируем базу данных
+	db, err := database.New("data/bot.db")
+	if err != nil {
+		log.Printf("Warning: Failed to initialize database: %v", err)
+		db = nil // Бот будет работать без базы данных
+	}
+
 	// Создаём контекст с обработкой сигналов
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	// Создаём глобальный обработчик
-	h := handlers.NewHandler(cfg)
+	h := handlers.NewHandler(cfg, db)
 
 	// Создаём бота с defaultHandler который обрабатывает ВСЕ типы обновлений
 	opts := []bot.Option{
@@ -43,6 +52,12 @@ func main() {
 			// Обрабатываем команду /start
 			if update.Message != nil && update.Message.Text == "/start" {
 				h.StartHandler(ctx, b, update)
+				return
+			}
+
+			// Обрабатываем команду /stats (только для админа)
+			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/stats") {
+				h.StatsHandler(ctx, b, update)
 				return
 			}
 

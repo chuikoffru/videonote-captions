@@ -12,6 +12,7 @@ import (
 	"telegram-voice-video-bot/internal/audio"
 	"telegram-voice-video-bot/internal/avatar"
 	"telegram-voice-video-bot/internal/config"
+	"telegram-voice-video-bot/internal/database"
 	"telegram-voice-video-bot/internal/transcription"
 	"telegram-voice-video-bot/internal/video"
 
@@ -39,13 +40,15 @@ var PendingInvoices sync.Map
 type Handler struct {
 	Config      *config.Config
 	Transcriber *transcription.Service
+	DB          *database.DB
 }
 
 // NewHandler создаёт новый обработчик
-func NewHandler(cfg *config.Config) *Handler {
+func NewHandler(cfg *config.Config, db *database.DB) *Handler {
 	return &Handler{
 		Config:      cfg,
 		Transcriber: transcription.New(cfg.OpenAIAPIKey, cfg.Proxy),
+		DB:          db,
 	}
 }
 
@@ -55,6 +58,19 @@ func (h *Handler) StartHandler(ctx context.Context, b *bot.Bot, update *models.U
 		return
 	}
 
+	// Регистрируем пользователя
+	if h.DB != nil && update.Message.From != nil {
+		_, err := h.DB.GetOrCreateUser(
+			update.Message.From.ID,
+			update.Message.From.Username,
+			update.Message.From.FirstName,
+			update.Message.From.LastName,
+		)
+		if err != nil {
+			log.Printf("Failed to register user: %v", err)
+		}
+	}
+
 	_, err := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: update.Message.Chat.ID,
 		Text:   "👋 Привет! Отправь мне голосовое сообщение или перешли чужое, и я создам видео с визуализацией аудио, аватаркой и субтитрами!",
@@ -62,6 +78,55 @@ func (h *Handler) StartHandler(ctx context.Context, b *bot.Bot, update *models.U
 	if err != nil {
 		log.Printf("Failed to send start message: %v", err)
 	}
+}
+
+// StatsHandler обрабатывает команду /stats (только для админа)
+func (h *Handler) StatsHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil || update.Message.From == nil {
+		return
+	}
+
+	// Проверяем, что это админ
+	if update.Message.From.ID != h.Config.AdminID {
+		log.Printf("Stats requested by non-admin user: %d", update.Message.From.ID)
+		return
+	}
+
+	if h.DB == nil {
+		b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: update.Message.Chat.ID,
+			Text:   "❌ База данных не инициализирована.",
+		})
+		return
+	}
+
+	stats, userCount, err := h.DB.GetStats()
+	if err != nil {
+		log.Printf("Failed to get stats: %v", err)
+		b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: update.Message.Chat.ID,
+			Text:   "❌ Ошибка получения статистики.",
+		})
+		return
+	}
+
+	statsText := fmt.Sprintf(`📊 *Статистика бота*
+
+👥 Пользователей: %d
+🎬 Бесплатных видео: %d
+💳 Запросов оплаты: %d
+✅ Оплаченных видео: %d`,
+		userCount,
+		stats.TotalFreeVideos,
+		stats.TotalPaymentRequests,
+		stats.TotalPaidVideos,
+	)
+
+	b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    update.Message.Chat.ID,
+		Text:      statsText,
+		ParseMode: models.ParseModeMarkdown,
+	})
 }
 
 // VoiceHandler обрабатывает голосовые сообщения
@@ -146,8 +211,21 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 		author = h.resolveVoiceAuthor(msg)
 	}
 
-	// Проверяем длительность и оплату
-	if !isPaid && voice.Duration > h.Config.FreeSeconds {
+	// Регистрируем пользователя если ещё не зарегистрирован
+	if h.DB != nil && msg.From != nil {
+		h.DB.GetOrCreateUser(
+			msg.From.ID,
+			msg.From.Username,
+			msg.From.FirstName,
+			msg.From.LastName,
+		)
+	}
+
+	// Проверяем, является ли пользователь админом (админ без ограничений)
+	isAdmin := msg.From != nil && msg.From.ID == h.Config.AdminID
+
+	// Проверяем длительность и оплату (админ пропускает оплату)
+	if !isPaid && !isAdmin && voice.Duration > h.Config.FreeSeconds {
 		duration := voice.Duration
 		// Расчёт: количество 60-секундных блоков сверх бесплатного лимита
 		paidMinutes := (duration - h.Config.FreeSeconds + 59) / 60 // Округление вверх
@@ -161,6 +239,11 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 			FileID: voice.FileID,
 			Author: *author,
 		})
+
+		// Логируем запрос оплаты
+		if h.DB != nil {
+			h.DB.LogPaymentRequest()
+		}
 
 		b.SendInvoice(ctx, &bot.SendInvoiceParams{
 			ChatID:      msg.Chat.ID,
@@ -253,7 +336,7 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 	}
 	defer videoFile.Close()
 
-	_, err = b.SendVideo(ctx, &bot.SendVideoParams{
+	videoResult, err := b.SendVideo(ctx, &bot.SendVideoParams{
 		ChatID: msg.Chat.ID,
 		Video:  &models.InputFileUpload{Filename: "video.mp4", Data: videoFile},
 	})
@@ -261,6 +344,19 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 		log.Printf("Failed to send video: %v", err)
 		h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "❌ Произошла ошибка при отправке видео.")
 		return
+	}
+
+	// Логируем видео в базу данных
+	if h.DB != nil && msg.From != nil {
+		videoFileID := ""
+		if videoResult.Video != nil {
+			videoFileID = videoResult.Video.FileID
+		}
+		if isPaid {
+			h.DB.LogPaidVideo(msg.From.ID, voice.Duration, videoFileID)
+		} else {
+			h.DB.LogFreeVideo(msg.From.ID, voice.Duration, videoFileID)
+		}
 	}
 
 	// Удаляем статусное сообщение

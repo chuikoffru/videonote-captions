@@ -16,8 +16,9 @@ type Config struct {
 	VideoBitrate string
 
 	// Монетизация
-	StarsPerMinute int // Стоимость каждых 60 секунд сверх бесплатного лимита
-	FreeSeconds    int // Бесплатный лимит в секундах
+	StarsPerMinute int   // Стоимость каждых 60 секунд сверх бесплатного лимита
+	FreeSeconds    int   // Бесплатный лимит в секундах
+	AdminID        int64 // Telegram ID администратора (без лимитов)
 }
 
 func Load() *Config {
@@ -50,6 +51,9 @@ func Load() *Config {
 	}
 	if fs, err := strconv.Atoi(os.Getenv("FREE_SECONDS")); err == nil && fs > 0 {
 		cfg.FreeSeconds = fs
+	}
+	if adminID, err := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64); err == nil && adminID > 0 {
+		cfg.AdminID = adminID
 	}
 
 	return cfg
