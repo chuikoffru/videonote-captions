@@ -49,8 +49,8 @@ bot.on('pre_checkout_query', async (ctx) => {
 bot.on('message:successful_payment', async (ctx) => {
   const payload = ctx.message.successful_payment.invoice_payload;
 
-  const fileId = pendingInvoices.get(payload);
-  if (!fileId) {
+  const orderData = pendingInvoices.get(payload);
+  if (!orderData) {
     return ctx.reply('❌ Ошибка: файл не найден (возможно, бот был перезагружен). Перешлите сообщение снова.');
   }
 
@@ -59,15 +59,18 @@ bot.on('message:successful_payment', async (ctx) => {
 
   // Создаем объект voice с file_id
   const voice = {
-    file_id: fileId,
+    file_id: orderData.fileId,
     duration: 0
   };
 
   await ctx.reply('✅ Оплата прошла успешно! Начинаю генерацию видео.');
-  await handleVoiceMessage(ctx, voice, true);
+  await handleVoiceMessage(ctx, voice, true, orderData.author);
 });
 
-async function handleVoiceMessage(ctx, voice, isPaid = false) {
+async function handleVoiceMessage(ctx, voice, isPaid = false, authorOverride = null) {
+  // Определяем автора сообщения
+  const author = authorOverride || resolveMessageAuthor(ctx);
+
   // Проверяем длительность и оплату
   if (!isPaid && voice.duration > 60) {
     const duration = voice.duration;
@@ -76,7 +79,12 @@ async function handleVoiceMessage(ctx, voice, isPaid = false) {
 
     // Генерируем уникальный ID для payload
     const payloadId = `${ctx.from.id}_${Date.now()}`;
-    pendingInvoices.set(payloadId, voice.file_id);
+
+    // Сохраняем file_id и информацию об авторе
+    pendingInvoices.set(payloadId, {
+      fileId: voice.file_id,
+      author: author
+    });
 
     await ctx.api.sendInvoice(
       ctx.chat.id,
@@ -101,31 +109,6 @@ async function handleVoiceMessage(ctx, voice, isPaid = false) {
     );
     const audioPath = await downloadAudio(ctx, voice);
 
-    // Определяем целевого пользователя (автора сообщения)
-    const msg = ctx.message;
-    let targetUserId = ctx.from.id;
-    let targetUsername = ctx.from.username || ctx.from.first_name;
-
-    // Проверяем, является ли сообщение пересланным
-    if (msg.forward_origin) {
-      // Новое API (Grammy 1.20+ / Bot API 7.0)
-      if (msg.forward_origin.type === 'user') {
-        targetUserId = msg.forward_origin.sender_user.id;
-        targetUsername = msg.forward_origin.sender_user.username || msg.forward_origin.sender_user.first_name;
-      } else if (msg.forward_origin.type === 'hidden_user') {
-        targetUserId = null; // Аватар недоступен
-        targetUsername = msg.forward_origin.sender_user_name;
-      }
-    } else if (msg.forward_from) {
-      // Legacy API
-      targetUserId = msg.forward_from.id;
-      targetUsername = msg.forward_from.username || msg.forward_from.first_name;
-    } else if (msg.forward_sender_name) {
-      // Скрытый отправитель (Legacy)
-      targetUserId = null;
-      targetUsername = msg.forward_sender_name;
-    }
-
     // Транскрибируем аудио в текст
     await ctx.api.editMessageText(
       ctx.chat.id,
@@ -134,13 +117,13 @@ async function handleVoiceMessage(ctx, voice, isPaid = false) {
     );
     const transcription = await transcribeAudio(audioPath);
 
-    // Скачиваем аватарку пользователя
+    // Скачиваем аватарку (автора или канала)
     await ctx.api.editMessageText(
       ctx.chat.id,
       statusMsg.message_id,
       '🖼️ Загружаю аватар...'
     );
-    const avatarPath = await downloadAvatar(ctx, targetUserId);
+    const avatarPath = await downloadAvatar(ctx, author.id, author.type);
 
     // Генерируем видео
     await ctx.api.editMessageText(
@@ -151,13 +134,13 @@ async function handleVoiceMessage(ctx, voice, isPaid = false) {
 
     let lastUpdatePercent = 0;
 
-    console.log('Target Username for video:', targetUsername);
+    console.log('Video Target:', author.username);
 
     const videoPath = await generateVideo(
       audioPath,
       avatarPath,
       transcription,
-      targetUsername,
+      author.username, // Используем имя автора
       async (percent) => {
         // Обновляем статус каждые 5%
         if (percent - lastUpdatePercent >= 5 || percent === 100) {
@@ -217,3 +200,72 @@ bot.catch((err) => {
 // Запуск бота
 bot.start();
 console.log('✅ Бот запущен!');
+
+/**
+ * Определяет автора сообщения (или исходного автора, если сообщение переслано)
+ * Поддерживает User, Hidden User, Channel, Chat и Legacy API
+ */
+function resolveMessageAuthor(ctx) {
+  const msg = ctx.message;
+
+  // 1. Проверяем forward_origin (Bot API 7.0+)
+  if (msg.forward_origin) {
+    const origin = msg.forward_origin;
+    switch (origin.type) {
+      case 'user':
+        return {
+          id: origin.sender_user.id,
+          username: origin.sender_user.username || origin.sender_user.first_name,
+          type: 'user'
+        };
+      case 'hidden_user':
+        return {
+          id: null,
+          username: origin.sender_user_name,
+          type: 'hidden_user'
+        };
+      case 'chat':
+        return {
+          id: origin.sender_chat.id,
+          username: origin.sender_chat.title,
+          type: 'chat'
+        };
+      case 'channel':
+        return {
+          id: origin.chat.id,
+          username: origin.chat.title,
+          type: 'channel'
+        };
+    }
+  }
+
+  // 2. Legacy API
+  if (msg.forward_from) {
+    return {
+      id: msg.forward_from.id,
+      username: msg.forward_from.username || msg.forward_from.first_name,
+      type: 'user'
+    };
+  }
+  if (msg.forward_sender_name) {
+    return {
+      id: null,
+      username: msg.forward_sender_name,
+      type: 'hidden_user'
+    };
+  }
+  if (msg.forward_from_chat) {
+    return {
+      id: msg.forward_from_chat.id,
+      username: msg.forward_from_chat.title,
+      type: msg.forward_from_chat.type === 'channel' ? 'channel' : 'chat'
+    };
+  }
+
+  // 3. Если не переслано - берем текущего отправителя
+  return {
+    id: ctx.from.id,
+    username: ctx.from.username || ctx.from.first_name,
+    type: 'user'
+  };
+}
