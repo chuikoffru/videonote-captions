@@ -27,7 +27,7 @@ async function runManualVideo() {
     }
 
     try {
-        const videoPath = await generateVideo(audioPath, avatarPath, srtPath);
+        const videoPath = await generateVideo(audioPath, avatarPath, srtPath, '@test_user');
         console.log('SUCCESS: Video generated at', videoPath);
     } catch (e) {
         console.error('FAILURE: Video generation failed:', e);

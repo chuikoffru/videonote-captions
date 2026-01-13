@@ -4,6 +4,8 @@ FROM node:20-bullseye
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     fonts-liberation \
+    fonts-noto \
+    fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

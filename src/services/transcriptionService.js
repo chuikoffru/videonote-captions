@@ -1,9 +1,19 @@
 const OpenAI = require('openai');
 const fs = require('fs');
+const { ProxyAgent } = require('undici');
 
-const openai = new OpenAI({
+const openaiConfig = {
   apiKey: process.env.OPENAI_API_KEY
-});
+};
+
+if (process.env.PROXY) {
+  const dispatcher = new ProxyAgent(process.env.PROXY);
+  openaiConfig.fetchOptions = {
+    dispatcher
+  };
+}
+
+const openai = new OpenAI(openaiConfig);
 
 /**
  * Транскрибирует аудио в текст с временными метками

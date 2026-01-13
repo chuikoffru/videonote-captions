@@ -31,7 +31,7 @@ bot.on('message:forward_origin', async (ctx) => {
 
 async function handleVoiceMessage(ctx, voice) {
   const statusMsg = await ctx.reply('⏳ Обрабатываю голосовое сообщение...');
-  
+
   try {
     // Скачиваем аудио
     await ctx.api.editMessageText(
@@ -40,7 +40,32 @@ async function handleVoiceMessage(ctx, voice) {
       '⬇️ Загружаю аудио...'
     );
     const audioPath = await downloadAudio(ctx, voice);
-    
+
+    // Определяем целевого пользователя (автора сообщения)
+    const msg = ctx.message;
+    let targetUserId = ctx.from.id;
+    let targetUsername = ctx.from.username || ctx.from.first_name;
+
+    // Проверяем, является ли сообщение пересланным
+    if (msg.forward_origin) {
+      // Новое API (Grammy 1.20+ / Bot API 7.0)
+      if (msg.forward_origin.type === 'user') {
+        targetUserId = msg.forward_origin.sender_user.id;
+        targetUsername = msg.forward_origin.sender_user.username || msg.forward_origin.sender_user.first_name;
+      } else if (msg.forward_origin.type === 'hidden_user') {
+        targetUserId = null; // Аватар недоступен
+        targetUsername = msg.forward_origin.sender_user_name;
+      }
+    } else if (msg.forward_from) {
+      // Legacy API
+      targetUserId = msg.forward_from.id;
+      targetUsername = msg.forward_from.username || msg.forward_from.first_name;
+    } else if (msg.forward_sender_name) {
+      // Скрытый отправитель (Legacy)
+      targetUserId = null;
+      targetUsername = msg.forward_sender_name;
+    }
+
     // Транскрибируем аудио в текст
     await ctx.api.editMessageText(
       ctx.chat.id,
@@ -48,23 +73,48 @@ async function handleVoiceMessage(ctx, voice) {
       '📝 Создаю субтитры...'
     );
     const transcription = await transcribeAudio(audioPath);
-    
+
     // Скачиваем аватарку пользователя
     await ctx.api.editMessageText(
       ctx.chat.id,
       statusMsg.message_id,
       '🖼️ Загружаю аватар...'
     );
-    const avatarPath = await downloadAvatar(ctx);
-    
+    const avatarPath = await downloadAvatar(ctx, targetUserId);
+
     // Генерируем видео
     await ctx.api.editMessageText(
       ctx.chat.id,
       statusMsg.message_id,
-      '🎬 Создаю видео... (это может занять некоторое время)'
+      '🎬 Создаю видео: 0%'
     );
-    const videoPath = await generateVideo(audioPath, avatarPath, transcription);
-    
+
+    let lastUpdatePercent = 0;
+
+    console.log('Target Username for video:', targetUsername);
+
+    const videoPath = await generateVideo(
+      audioPath,
+      avatarPath,
+      transcription,
+      targetUsername,
+      async (percent) => {
+        // Обновляем статус каждые 5%
+        if (percent - lastUpdatePercent >= 5 || percent === 100) {
+          lastUpdatePercent = percent;
+          try {
+            await ctx.api.editMessageText(
+              ctx.chat.id,
+              statusMsg.message_id,
+              `🎬 Создаю видео: ${percent}%`
+            );
+          } catch (e) {
+            // Игнорируем ошибки обновления статуса
+          }
+        }
+      }
+    );
+
     // Отправляем видео
     await ctx.api.editMessageText(
       ctx.chat.id,
@@ -72,13 +122,13 @@ async function handleVoiceMessage(ctx, voice) {
       '📤 Отправляю видео...'
     );
     await ctx.replyWithVideo(new InputFile(videoPath));
-    
+
     // Удаляем сообщение о статусе
     await ctx.api.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    
+
     // Очищаем временные файлы
     await cleanupFiles([audioPath, avatarPath, videoPath]);
-    
+
   } catch (error) {
     console.error('Ошибка при обработке:', error);
     await ctx.api.editMessageText(
