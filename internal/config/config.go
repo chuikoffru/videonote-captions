@@ -14,17 +14,23 @@ type Config struct {
 	VideoHeight  int
 	VideoFPS     int
 	VideoBitrate string
+
+	// Монетизация
+	StarsPerMinute int // Стоимость каждых 60 секунд сверх бесплатного лимита
+	FreeSeconds    int // Бесплатный лимит в секундах
 }
 
 func Load() *Config {
 	cfg := &Config{
-		BotToken:     os.Getenv("BOT_TOKEN"),
-		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
-		Proxy:        os.Getenv("PROXY"),
-		VideoWidth:   1280,
-		VideoHeight:  720,
-		VideoFPS:     30,
-		VideoBitrate: "2000k",
+		BotToken:       os.Getenv("BOT_TOKEN"),
+		OpenAIAPIKey:   os.Getenv("OPENAI_API_KEY"),
+		Proxy:          os.Getenv("PROXY"),
+		VideoWidth:     1280,
+		VideoHeight:    720,
+		VideoFPS:       30,
+		VideoBitrate:   "2000k",
+		StarsPerMinute: 10, // По умолчанию 10 звёзд за 60 секунд
+		FreeSeconds:    60, // По умолчанию 60 секунд бесплатно
 	}
 
 	if w, err := strconv.Atoi(os.Getenv("VIDEO_WIDTH")); err == nil && w > 0 {
@@ -38,6 +44,12 @@ func Load() *Config {
 	}
 	if br := os.Getenv("VIDEO_BITRATE"); br != "" {
 		cfg.VideoBitrate = br
+	}
+	if spm, err := strconv.Atoi(os.Getenv("STARS_PER_MINUTE")); err == nil && spm > 0 {
+		cfg.StarsPerMinute = spm
+	}
+	if fs, err := strconv.Atoi(os.Getenv("FREE_SECONDS")); err == nil && fs > 0 {
+		cfg.FreeSeconds = fs
 	}
 
 	return cfg

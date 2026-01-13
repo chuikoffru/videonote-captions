@@ -147,9 +147,11 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 	}
 
 	// Проверяем длительность и оплату
-	if !isPaid && voice.Duration > 60 {
+	if !isPaid && voice.Duration > h.Config.FreeSeconds {
 		duration := voice.Duration
-		price := ((duration / 60) + 1) * 10 // Округление вверх
+		// Расчёт: количество 60-секундных блоков сверх бесплатного лимита
+		paidMinutes := (duration - h.Config.FreeSeconds + 59) / 60 // Округление вверх
+		price := paidMinutes * h.Config.StarsPerMinute
 
 		payloadID := fmt.Sprintf("%d_%d", msg.From.ID, time.Now().UnixNano())
 
@@ -163,7 +165,7 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 		b.SendInvoice(ctx, &bot.SendInvoiceParams{
 			ChatID:      msg.Chat.ID,
 			Title:       "Длинное голосовое сообщение",
-			Description: fmt.Sprintf("Первые 60 секунд — бесплатно! Каждые следующие 60 секунд — 10 звезд. Стоимость твоего видео %d Telegram Stars", price),
+			Description: fmt.Sprintf("Первые %d секунд — бесплатно! Каждые следующие 60 секунд — %d звёзд. Стоимость твоего видео %d Telegram Stars", h.Config.FreeSeconds, h.Config.StarsPerMinute, price),
 			Payload:     payloadID,
 			Currency:    "XTR",
 			Prices: []models.LabeledPrice{

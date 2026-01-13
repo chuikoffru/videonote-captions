@@ -10,6 +10,10 @@ const { downloadAvatar } = require('./utils/avatarUtils');
 const bot = new Bot(process.env.BOT_TOKEN);
 const pendingInvoices = new Map();
 
+// Настройки монетизации (из .env или значения по умолчанию)
+const STARS_PER_MINUTE = parseInt(process.env.STARS_PER_MINUTE, 10) || 10;
+const FREE_SECONDS = parseInt(process.env.FREE_SECONDS, 10) || 60;
+
 // Хранилище для ожидающих оплаты file_id (чтобы не превышать лимит payload и для валидации)
 // Ключ: unique_payload_id, Значение: file_id
 
@@ -72,10 +76,11 @@ async function handleVoiceMessage(ctx, voice, isPaid = false, authorOverride = n
   const author = authorOverride || resolveMessageAuthor(ctx);
 
   // Проверяем длительность и оплату
-  if (!isPaid && voice.duration > 60) {
+  if (!isPaid && voice.duration > FREE_SECONDS) {
     const duration = voice.duration;
-    // Расчет стоимости: 10 звезд за каждые 60 секунд (округление вверх)
-    const price = Math.ceil(duration / 60) * 10;
+    // Расчёт: количество 60-секундных блоков сверх бесплатного лимита
+    const paidMinutes = Math.ceil((duration - FREE_SECONDS) / 60);
+    const price = paidMinutes * STARS_PER_MINUTE;
 
     // Генерируем уникальный ID для payload
     const payloadId = `${ctx.from.id}_${Date.now()}`;
@@ -89,7 +94,7 @@ async function handleVoiceMessage(ctx, voice, isPaid = false, authorOverride = n
     await ctx.api.sendInvoice(
       ctx.chat.id,
       'Длинное голосовое сообщение',
-      `Первые 60 секунд — бесплатно! Каждые следующие 60 секунд — 10 звезд. Стоимость твоего видео ${price} Telegram Stars`,
+      `Первые ${FREE_SECONDS} секунд — бесплатно! Каждые следующие 60 секунд — ${STARS_PER_MINUTE} звёзд. Стоимость твоего видео ${price} Telegram Stars`,
       payloadId, // payload
       'XTR', // currency
       [{ label: 'Видео', amount: price }], // prices
