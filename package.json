@@ -1,0 +1,32 @@
+{
+  "name": "telegram-voice-video-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot that converts voice messages to videos with waveform visualization, avatar, and subtitles",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "voice",
+    "video",
+    "grammy",
+    "ffmpeg"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "axios": "^1.13.2",
+    "canvas": "^3.2.1",
+    "dotenv": "^17.2.3",
+    "fluent-ffmpeg": "^2.1.3",
+    "form-data": "^4.0.5",
+    "grammy": "^1.39.2",
+    "openai": "^6.16.0"
+  }
+}
