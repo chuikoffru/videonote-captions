@@ -1,7 +1,6 @@
 package video
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -145,32 +144,54 @@ func GenerateVideo(audioPath, avatarPath string, transcriptionResult *transcript
 	}
 
 	// Парсим прогресс из stderr
+	// FFmpeg выводит прогресс с \r (carriage return), а не \n, поэтому читаем небольшими чанками
 	progressRegex := regexp.MustCompile(`time=(\d+):(\d+):(\d+)\.(\d+)`)
-	scanner := bufio.NewScanner(stderr)
-	scanner.Split(bufio.ScanLines)
 
 	lastPercent := 0
-	for scanner.Scan() {
-		line := scanner.Text()
-		if matches := progressRegex.FindStringSubmatch(line); matches != nil {
-			// Простая эвристика: предполагаем видео до 5 минут
-			hours, _ := strconv.Atoi(matches[1])
-			minutes, _ := strconv.Atoi(matches[2])
-			seconds, _ := strconv.Atoi(matches[3])
-			totalSeconds := hours*3600 + minutes*60 + seconds
+	buf := make([]byte, 256)
+	var accumulated string
 
-			// Эвристика: 60 секунд = 100%
-			percent := totalSeconds * 100 / 60
-			if percent > 100 {
-				percent = 99
+	// Получаем длительность аудио для корректного расчёта прогресса
+	audioDuration := getAudioDuration(audioPath)
+	if audioDuration <= 0 {
+		audioDuration = 60 // fallback
+	}
+
+	go func() {
+		for {
+			n, err := stderr.Read(buf)
+			if n > 0 {
+				accumulated += string(buf[:n])
+
+				// Ищем все совпадения времени в накопленных данных
+				if matches := progressRegex.FindStringSubmatch(accumulated); matches != nil {
+					hours, _ := strconv.Atoi(matches[1])
+					minutes, _ := strconv.Atoi(matches[2])
+					seconds, _ := strconv.Atoi(matches[3])
+					totalSeconds := hours*3600 + minutes*60 + seconds
+
+					// Рассчитываем процент на основе реальной длительности аудио
+					percent := totalSeconds * 100 / int(audioDuration)
+					if percent > 99 {
+						percent = 99
+					}
+
+					if percent != lastPercent && onProgress != nil {
+						onProgress(percent)
+						lastPercent = percent
+					}
+
+					// Очищаем накопленные данные, оставляя только последние 100 символов
+					if len(accumulated) > 200 {
+						accumulated = accumulated[len(accumulated)-100:]
+					}
+				}
 			}
-
-			if percent != lastPercent && onProgress != nil {
-				onProgress(percent)
-				lastPercent = percent
+			if err != nil {
+				break
 			}
 		}
-	}
+	}()
 
 	if err := cmd.Wait(); err != nil {
 		return "", fmt.Errorf("ffmpeg failed: %w", err)
@@ -240,6 +261,20 @@ func createSubtitleFile(result *transcription.Result, outputPath string) error {
 	}
 
 	return os.WriteFile(outputPath, []byte(content.String()), 0644)
+}
+
+// getAudioDuration получает длительность аудио в секундах через ffprobe
+func getAudioDuration(audioPath string) float64 {
+	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audioPath)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	duration, err := strconv.ParseFloat(strings.TrimSpace(string(output)), 64)
+	if err != nil {
+		return 0
+	}
+	return duration
 }
 
 // formatSRTTime форматирует время в SRT формат
