@@ -18,6 +18,7 @@ type Config struct {
 	// Монетизация
 	StarsPerMinute int   // Стоимость каждых 60 секунд сверх бесплатного лимита
 	FreeSeconds    int   // Бесплатный лимит в секундах
+	VerticalCost   int   // Стоимость вертикального видео
 	AdminID        int64 // Telegram ID администратора (без лимитов)
 }
 
@@ -32,6 +33,7 @@ func Load() *Config {
 		VideoBitrate:   "2000k",
 		StarsPerMinute: 10, // По умолчанию 10 звёзд за 60 секунд
 		FreeSeconds:    60, // По умолчанию 60 секунд бесплатно
+		VerticalCost:   5,  // По умолчанию 5 звёзд за вертикальное видео
 	}
 
 	if w, err := strconv.Atoi(os.Getenv("VIDEO_WIDTH")); err == nil && w > 0 {
@@ -51,6 +53,9 @@ func Load() *Config {
 	}
 	if fs, err := strconv.Atoi(os.Getenv("FREE_SECONDS")); err == nil && fs > 0 {
 		cfg.FreeSeconds = fs
+	}
+	if vc, err := strconv.Atoi(os.Getenv("VERTICAL_COST")); err == nil && vc > 0 {
+		cfg.VerticalCost = vc
 	}
 	if adminID, err := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64); err == nil && adminID > 0 {
 		cfg.AdminID = adminID

@@ -39,6 +39,15 @@ type Stats struct {
 	UpdatedAt            time.Time
 }
 
+// VoiceCache хранит кэш обработанных голосовых сообщений
+type VoiceCache struct {
+	ID                  uint   `gorm:"primaryKey"`
+	VoiceFileUniqueID   string `gorm:"uniqueIndex"` // file_unique_id голосового сообщения
+	VideoFileID         string // file_id горизонтального видео
+	VerticalVideoFileID string // file_id вертикального видео (опционально)
+	CreatedAt           time.Time
+}
+
 // DB обёртка над gorm.DB
 type DB struct {
 	*gorm.DB
@@ -54,7 +63,7 @@ func New(dbPath string) (*DB, error) {
 	}
 
 	// Автомиграция
-	if err := db.AutoMigrate(&User{}, &VideoLog{}, &Stats{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &VideoLog{}, &Stats{}, &VoiceCache{}); err != nil {
 		return nil, err
 	}
 
@@ -158,4 +167,57 @@ func (d *DB) GetStats() (*Stats, int64, error) {
 	}
 
 	return &stats, userCount, nil
+}
+
+// GetCachedVideo ищет кэшированное видео по file_unique_id голосового сообщения
+func (d *DB) GetCachedVideo(voiceFileUniqueID string) (*VoiceCache, error) {
+	var cache VoiceCache
+	err := d.Where("voice_file_unique_id = ?", voiceFileUniqueID).First(&cache).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &cache, nil
+}
+
+// SaveVideoCache сохраняет кэш горизонтального видео
+func (d *DB) SaveVideoCache(voiceFileUniqueID, videoFileID string) error {
+	// Пробуем найти существующий кэш
+	var cache VoiceCache
+	err := d.Where("voice_file_unique_id = ?", voiceFileUniqueID).First(&cache).Error
+	if err == gorm.ErrRecordNotFound {
+		// Создаём новый
+		cache = VoiceCache{
+			VoiceFileUniqueID: voiceFileUniqueID,
+			VideoFileID:       videoFileID,
+		}
+		return d.Create(&cache).Error
+	}
+	if err != nil {
+		return err
+	}
+	// Обновляем существующий
+	return d.Model(&cache).Update("video_file_id", videoFileID).Error
+}
+
+// SaveVerticalVideoCache сохраняет кэш вертикального видео
+func (d *DB) SaveVerticalVideoCache(voiceFileUniqueID, verticalVideoFileID string) error {
+	// Пробуем найти существующий кэш
+	var cache VoiceCache
+	err := d.Where("voice_file_unique_id = ?", voiceFileUniqueID).First(&cache).Error
+	if err == gorm.ErrRecordNotFound {
+		// Создаём новый
+		cache = VoiceCache{
+			VoiceFileUniqueID:   voiceFileUniqueID,
+			VerticalVideoFileID: verticalVideoFileID,
+		}
+		return d.Create(&cache).Error
+	}
+	if err != nil {
+		return err
+	}
+	// Обновляем существующий
+	return d.Model(&cache).Update("vertical_video_file_id", verticalVideoFileID).Error
 }

@@ -48,6 +48,9 @@ func main() {
 			if update.PreCheckoutQuery != nil {
 				log.Printf("Update: PreCheckoutQuery received")
 			}
+			if update.CallbackQuery != nil {
+				log.Printf("Update: CallbackQuery received, data: %s", update.CallbackQuery.Data)
+			}
 
 			// Обрабатываем команду /start
 			if update.Message != nil && update.Message.Text == "/start" {
@@ -78,6 +81,17 @@ func main() {
 				h.PreCheckoutHandler(ctx, b, update)
 				return
 			}
+
+			// Обрабатываем нажатия на кнопки (CallbackQuery)
+			if update.CallbackQuery != nil {
+				h.VerticalCallbackHandler(ctx, b, update)
+				return
+			}
+		}),
+		bot.WithAllowedUpdates(bot.AllowedUpdates{
+			"message",
+			"callback_query",
+			"pre_checkout_query",
 		}),
 	}
 

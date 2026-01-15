@@ -29,12 +29,19 @@ type Author struct {
 
 // OrderData хранит данные заказа для оплаты
 type OrderData struct {
-	FileID string
-	Author Author
+	Type                string // "voice" or "vertical"
+	FileID              string // Для голоса - file_id голосового, для вертикального - file_id голосового
+	FileUniqueID        string // file_unique_id для кэширования
+	OriginalVideoFileID string // Только для вертикального видео
+	Author              Author
 }
 
 // PendingInvoices хранилище ожидающих оплаты
 var PendingInvoices sync.Map
+
+// VerticalRequests хранилище данных для запросов вертикального видео (key -> OrderData)
+var VerticalRequests sync.Map
+var verticalRequestCounter int64
 
 // Handler содержит зависимости для обработчиков
 type Handler struct {
@@ -135,7 +142,7 @@ func (h *Handler) VoiceHandler(ctx context.Context, b *bot.Bot, update *models.U
 		return
 	}
 
-	h.handleVoiceMessage(ctx, b, update.Message, update.Message.Voice, false, nil)
+	h.handleVoiceMessage(ctx, b, update.Message, update.Message.Voice, false, nil, update.Message.Voice.FileUniqueID)
 }
 
 // PreCheckoutHandler обрабатывает pre_checkout_query
@@ -181,30 +188,131 @@ func (h *Handler) SuccessfulPaymentHandler(ctx context.Context, b *bot.Bot, upda
 		log.Printf("SuccessfulPayment: payload not found in PendingInvoices")
 		b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: update.Message.Chat.ID,
-			Text:   "❌ Ошибка: файл не найден (возможно, бот был перезагружен). Перешлите сообщение снова.",
+			Text:   "❌ Ошибка: заказ не найден (возможно, бот был перезагружен). Повторите попытку.",
 		})
 		return
 	}
 
-	log.Printf("SuccessfulPayment: payload found, starting video generation")
+	log.Printf("SuccessfulPayment: payload found, starting processing")
 	orderData := value.(OrderData)
 	PendingInvoices.Delete(payload)
 
-	voice := &models.Voice{
-		FileID:   orderData.FileID,
-		Duration: 0,
-	}
-
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: update.Message.Chat.ID,
-		Text:   "✅ Оплата прошла успешно! Начинаю генерацию видео.",
+		Text:   "✅ Оплата прошла успешно! Начинаю обработку.",
 	})
 
-	h.handleVoiceMessage(ctx, b, update.Message, voice, true, &orderData.Author)
+	if orderData.Type == "vertical" {
+		h.handleVerticalVideoRequest(ctx, b, update.Message, orderData.FileID, orderData.FileUniqueID, &orderData.Author)
+	} else {
+		voice := &models.Voice{
+			FileID:       orderData.FileID,
+			FileUniqueID: orderData.FileUniqueID,
+			Duration:     0,
+		}
+		h.handleVoiceMessage(ctx, b, update.Message, voice, true, &orderData.Author, orderData.FileUniqueID)
+	}
+}
+
+// VerticalCallbackHandler обрабатывает нажатие на кнопку "Сделать вертикальное видео"
+func (h *Handler) VerticalCallbackHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	log.Printf("VerticalCallbackHandler called")
+
+	if update.CallbackQuery == nil {
+		log.Printf("CallbackQuery is nil")
+		return
+	}
+
+	log.Printf("CallbackQuery data: %s", update.CallbackQuery.Data)
+
+	data := update.CallbackQuery.Data
+	if !strings.HasPrefix(data, "vert:") {
+		log.Printf("Data does not start with 'vert:': %s", data)
+		return
+	}
+
+	// Извлекаем ключ из callback_data
+	vertKey := strings.TrimPrefix(data, "vert:")
+
+	// Получаем данные из хранилища
+	value, ok := VerticalRequests.Load(vertKey)
+	if !ok {
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "❌ Запрос устарел. Отправьте голосовое сообщение снова.",
+			ShowAlert:       true,
+		})
+		return
+	}
+	log.Printf("Found vertical request with key: %s", vertKey)
+	orderData := value.(OrderData)
+
+	// Получаем chat_id из callback query
+	chatID := update.CallbackQuery.From.ID
+	if update.CallbackQuery.Message.Message != nil {
+		chatID = update.CallbackQuery.Message.Message.Chat.ID
+	}
+
+	// Проверяем кэш вертикального видео — если есть, отправляем бесплатно
+	if h.DB != nil && orderData.FileUniqueID != "" {
+		cache, err := h.DB.GetCachedVideo(orderData.FileUniqueID)
+		if err != nil {
+			log.Printf("Ошибка проверки кэша: %v", err)
+		} else if cache != nil && cache.VerticalVideoFileID != "" {
+			log.Printf("✅ Найден кэш вертикального видео, отправляем бесплатно")
+
+			// Отвечаем на callback
+			b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+				CallbackQueryID: update.CallbackQuery.ID,
+				Text:            "✅ Видео найдено в кэше!",
+			})
+
+			// Отправляем видео из кэша
+			_, err := b.SendVideo(ctx, &bot.SendVideoParams{
+				ChatID: chatID,
+				Video:  &models.InputFileString{Data: cache.VerticalVideoFileID},
+			})
+			if err != nil {
+				log.Printf("Ошибка отправки вертикального видео из кэша: %v", err)
+				b.SendMessage(ctx, &bot.SendMessageParams{
+					ChatID: chatID,
+					Text:   "❌ Ошибка отправки видео. Попробуйте ещё раз.",
+				})
+			}
+			return
+		}
+	}
+
+	// Отвечаем на callback чтобы убрать часики
+	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: update.CallbackQuery.ID,
+	})
+
+	// Создаем счет на оплату
+	payloadID := fmt.Sprintf("vert_%d_%d", update.CallbackQuery.From.ID, time.Now().UnixNano())
+
+	PendingInvoices.Store(payloadID, orderData)
+
+	// Логируем запрос оплаты
+	if h.DB != nil {
+		h.DB.LogPaymentRequest()
+	}
+
+	log.Printf("Sending invoice to chat %d", chatID)
+	b.SendInvoice(ctx, &bot.SendInvoiceParams{
+		ChatID:      chatID,
+		Title:       "Вертикальное видео (9:16)",
+		Description: "Видео будет адаптировано под формат TikTok/Reels/Shorts.",
+		Payload:     payloadID,
+		Currency:    "XTR",
+		Prices: []models.LabeledPrice{
+			{Label: "Вертикальное видео", Amount: h.Config.VerticalCost},
+		},
+	})
 }
 
 // handleVoiceMessage обрабатывает голосовое сообщение
-func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *models.Message, voice *models.Voice, isPaid bool, authorOverride *Author) {
+func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *models.Message, voice *models.Voice, isPaid bool, authorOverride *Author, voiceFileUniqueID string) {
 	// Определяем автора голосового сообщения
 	author := authorOverride
 	if author == nil {
@@ -219,6 +327,48 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 			msg.From.FirstName,
 			msg.From.LastName,
 		)
+	}
+
+	// Проверяем кэш перед обработкой
+	if h.DB != nil && voiceFileUniqueID != "" {
+		cache, err := h.DB.GetCachedVideo(voiceFileUniqueID)
+		if err != nil {
+			log.Printf("Ошибка проверки кэша: %v", err)
+		} else if cache != nil && cache.VideoFileID != "" {
+			log.Printf("✅ Найден кэш для voice_file_unique_id=%s, отправляем видео из кэша", voiceFileUniqueID)
+
+			// Создаем короткий ключ для callback_data
+			verticalRequestCounter++
+			vertKey := fmt.Sprintf("v%d", verticalRequestCounter)
+			VerticalRequests.Store(vertKey, OrderData{
+				Type:         "vertical",
+				FileID:       voice.FileID,
+				FileUniqueID: voiceFileUniqueID,
+				Author:       *author,
+			})
+
+			// Отправляем видео из кэша по file_id
+			_, err := b.SendVideo(ctx, &bot.SendVideoParams{
+				ChatID: msg.Chat.ID,
+				Video:  &models.InputFileString{Data: cache.VideoFileID},
+				ReplyMarkup: &models.InlineKeyboardMarkup{
+					InlineKeyboard: [][]models.InlineKeyboardButton{
+						{
+							{
+								Text:         fmt.Sprintf("📱 Сделать вертикальное видео (%d⭐)", h.Config.VerticalCost),
+								CallbackData: "vert:" + vertKey,
+							},
+						},
+					},
+				},
+			})
+			if err != nil {
+				log.Printf("Ошибка отправки видео из кэша: %v", err)
+				// Продолжаем обычную обработку если кэш не сработал
+			} else {
+				return // Успешно отправили из кэша
+			}
+		}
 	}
 
 	// Проверяем, является ли пользователь админом (админ без ограничений)
@@ -236,8 +386,10 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 		log.Printf("Creating invoice with payloadID: %s, fileID: %s", payloadID, voice.FileID)
 
 		PendingInvoices.Store(payloadID, OrderData{
-			FileID: voice.FileID,
-			Author: *author,
+			Type:         "voice",
+			FileID:       voice.FileID,
+			FileUniqueID: voiceFileUniqueID,
+			Author:       *author,
 		})
 
 		// Логируем запрос оплаты
@@ -336,9 +488,28 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 	}
 	defer videoFile.Close()
 
+	// Создаем короткий ключ для callback_data (ограничение Telegram - 64 байта)
+	verticalRequestCounter++
+	vertKey := fmt.Sprintf("v%d", verticalRequestCounter)
+	VerticalRequests.Store(vertKey, OrderData{
+		Type:   "vertical",
+		FileID: voice.FileID,
+		Author: *author,
+	})
+
 	videoResult, err := b.SendVideo(ctx, &bot.SendVideoParams{
 		ChatID: msg.Chat.ID,
 		Video:  &models.InputFileUpload{Filename: "video.mp4", Data: videoFile},
+		ReplyMarkup: &models.InlineKeyboardMarkup{
+			InlineKeyboard: [][]models.InlineKeyboardButton{
+				{
+					{
+						Text:         fmt.Sprintf("📱 Сделать вертикальное видео (%d⭐)", h.Config.VerticalCost),
+						CallbackData: "vert:" + vertKey,
+					},
+				},
+			},
+		},
 	})
 	if err != nil {
 		log.Printf("Failed to send video: %v", err)
@@ -357,6 +528,143 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 		} else {
 			h.DB.LogFreeVideo(msg.From.ID, voice.Duration, videoFileID)
 		}
+
+		// Сохраняем в кэш
+		if voiceFileUniqueID != "" && videoFileID != "" {
+			err := h.DB.SaveVideoCache(voiceFileUniqueID, videoFileID)
+			if err != nil {
+				log.Printf("Ошибка сохранения кэша видео: %v", err)
+			} else {
+				log.Printf("✅ Сохранён кэш видео для voice_file_unique_id=%s", voiceFileUniqueID)
+			}
+		}
+	}
+
+	// Удаляем статусное сообщение
+	b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+		ChatID:    msg.Chat.ID,
+		MessageID: statusMsg.ID,
+	})
+}
+
+// handleVerticalVideoRequest обрабатывает запрос на создание вертикального видео
+func (h *Handler) handleVerticalVideoRequest(ctx context.Context, b *bot.Bot, msg *models.Message, voiceFileID string, voiceFileUniqueID string, author *Author) {
+	// Проверяем кэш вертикального видео
+	if h.DB != nil && voiceFileUniqueID != "" {
+		cache, err := h.DB.GetCachedVideo(voiceFileUniqueID)
+		if err != nil {
+			log.Printf("Ошибка проверки кэша вертикального видео: %v", err)
+		} else if cache != nil && cache.VerticalVideoFileID != "" {
+			log.Printf("✅ Найден кэш вертикального видео для voice_file_unique_id=%s", voiceFileUniqueID)
+
+			// Отправляем видео из кэша
+			_, err := b.SendVideo(ctx, &bot.SendVideoParams{
+				ChatID: msg.Chat.ID,
+				Video:  &models.InputFileString{Data: cache.VerticalVideoFileID},
+			})
+			if err != nil {
+				log.Printf("Ошибка отправки вертикального видео из кэша: %v", err)
+				// Продолжаем обычную обработку
+			} else {
+				return // Успешно отправили из кэша
+			}
+		}
+	}
+
+	// Отправляем статусное сообщение
+	statusMsg, err := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: msg.Chat.ID,
+		Text:   "⏳ Начинаю создание вертикального видео...",
+	})
+	if err != nil {
+		log.Printf("Failed to send status message: %v", err)
+		return
+	}
+
+	// Скачиваем аудио
+	h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "⬇️ Загружаю аудио...")
+	audioPath, err := audio.DownloadAudio(ctx, b, voiceFileID, h.Config.BotToken)
+	if err != nil {
+		log.Printf("Failed to download audio: %v", err)
+		h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "❌ Ошибка при загрузке аудио.")
+		return
+	}
+	defer os.Remove(audioPath)
+
+	// Транскрибируем
+	h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "📝 Создаю субтитры...")
+	transcriptionResult, err := h.Transcriber.TranscribeAudio(ctx, audioPath)
+	if err != nil {
+		log.Printf("Failed to transcribe: %v", err)
+		transcriptionResult = &transcription.Result{Text: "", Words: nil}
+	}
+
+	// Скачиваем аватар
+	h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "🖼️ Загружаю аватар...")
+	avatarPath, err := avatar.Download(ctx, b, author.ID, author.Type, h.Config.BotToken)
+	if err != nil {
+		log.Printf("Failed to download avatar: %v", err)
+		h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "❌ Ошибка при загрузке аватара.")
+		return
+	}
+	defer os.Remove(avatarPath)
+
+	// Генерируем вертикальное видео
+	h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "🎬 Создаю вертикальное видео: 0%")
+
+	lastUpdatePercent := 0
+	videoPath, err := video.GenerateVerticalVideo(
+		audioPath,
+		avatarPath,
+		transcriptionResult,
+		author.Username,
+		h.Config.VideoFPS,
+		h.Config.VideoBitrate,
+		func(percent int) {
+			if percent-lastUpdatePercent >= 5 || percent == 100 {
+				lastUpdatePercent = percent
+				h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, fmt.Sprintf("🎬 Создаю вертикальное видео: %d%%", percent))
+			}
+		},
+	)
+	if err != nil {
+		log.Printf("Failed to generate vertical video: %v", err)
+		h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "❌ Ошибка при создании видео.")
+		return
+	}
+	defer os.Remove(videoPath)
+
+	// Отправляем видео
+	h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "📤 Отправлю результат...")
+
+	videoFile, err := os.Open(videoPath)
+	if err != nil {
+		log.Printf("Failed to open video file: %v", err)
+		return
+	}
+	defer videoFile.Close()
+
+	videoResult, err := b.SendVideo(ctx, &bot.SendVideoParams{
+		ChatID: msg.Chat.ID,
+		Video:  &models.InputFileUpload{Filename: "vertical_video.mp4", Data: videoFile},
+	})
+	if err != nil {
+		log.Printf("Failed to send vertical video: %v", err)
+	}
+
+	// Сохраняем в кэш
+	if h.DB != nil && voiceFileUniqueID != "" && videoResult != nil && videoResult.Video != nil {
+		err := h.DB.SaveVerticalVideoCache(voiceFileUniqueID, videoResult.Video.FileID)
+		if err != nil {
+			log.Printf("Ошибка сохранения кэша вертикального видео: %v", err)
+		} else {
+			log.Printf("✅ Сохранён кэш вертикального видео для voice_file_unique_id=%s", voiceFileUniqueID)
+		}
+	}
+
+	// Логируем в БД
+	if h.DB != nil {
+		h.DB.LogPaidVideo(msg.From.ID, 0, "")
 	}
 
 	// Удаляем статусное сообщение
