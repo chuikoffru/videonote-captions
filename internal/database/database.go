@@ -160,6 +160,13 @@ func (d *DB) LogVerticalVideo() error {
 	return d.Model(&Stats{}).Where("id = 1").Update("total_vertical_videos", gorm.Expr("total_vertical_videos + 1")).Error
 }
 
+// GetAllUsers возвращает список Telegram ID всех пользователей
+func (d *DB) GetAllUsers() ([]int64, error) {
+	var ids []int64
+	err := d.Model(&User{}).Pluck("telegram_id", &ids).Error
+	return ids, err
+}
+
 // GetStats возвращает статистику
 func (d *DB) GetStats() (*Stats, int64, error) {
 	var stats Stats

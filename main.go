@@ -64,6 +64,12 @@ func main() {
 				return
 			}
 
+			// Обрабатываем команду /broadcast (только для админа)
+			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/broadcast") {
+				h.BroadcastHandler(ctx, b, update)
+				return
+			}
+
 			// Обрабатываем голосовые сообщения
 			if update.Message != nil && update.Message.Voice != nil {
 				h.VoiceHandler(ctx, b, update)
