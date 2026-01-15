@@ -84,7 +84,11 @@ func main() {
 
 			// Обрабатываем нажатия на кнопки (CallbackQuery)
 			if update.CallbackQuery != nil {
-				h.VerticalCallbackHandler(ctx, b, update)
+				if strings.HasPrefix(update.CallbackQuery.Data, "vertcache:") {
+					h.VerticalCacheCallbackHandler(ctx, b, update)
+				} else {
+					h.VerticalCallbackHandler(ctx, b, update)
+				}
 				return
 			}
 		}),

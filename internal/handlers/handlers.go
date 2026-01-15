@@ -311,6 +311,82 @@ func (h *Handler) VerticalCallbackHandler(ctx context.Context, b *bot.Bot, updat
 	})
 }
 
+// VerticalCacheCallbackHandler обрабатывает нажатие на кнопку "Получить вертикальное видео" (из кэша, бесплатно)
+func (h *Handler) VerticalCacheCallbackHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	log.Printf("VerticalCacheCallbackHandler called")
+
+	if update.CallbackQuery == nil {
+		return
+	}
+
+	data := update.CallbackQuery.Data
+	if !strings.HasPrefix(data, "vertcache:") {
+		return
+	}
+
+	// Извлекаем ключ из callback_data
+	vertKey := strings.TrimPrefix(data, "vertcache:")
+
+	// Получаем данные из хранилища
+	value, ok := VerticalRequests.Load(vertKey)
+	if !ok {
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "❌ Запрос устарел. Отправьте голосовое сообщение снова.",
+			ShowAlert:       true,
+		})
+		return
+	}
+	orderData := value.(OrderData)
+
+	// Получаем chat_id
+	chatID := update.CallbackQuery.From.ID
+	if update.CallbackQuery.Message.Message != nil {
+		chatID = update.CallbackQuery.Message.Message.Chat.ID
+	}
+
+	// Получаем видео из кэша
+	if h.DB == nil || orderData.FileUniqueID == "" {
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "❌ Ошибка: кэш недоступен.",
+			ShowAlert:       true,
+		})
+		return
+	}
+
+	cache, err := h.DB.GetCachedVideo(orderData.FileUniqueID)
+	if err != nil || cache == nil || cache.VerticalVideoFileID == "" {
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "❌ Видео не найдено в кэше.",
+			ShowAlert:       true,
+		})
+		return
+	}
+
+	// Отвечаем на callback
+	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: update.CallbackQuery.ID,
+		Text:            "✅ Отправляю видео из кэша!",
+	})
+
+	// Отправляем видео из кэша
+	_, err = b.SendVideo(ctx, &bot.SendVideoParams{
+		ChatID: chatID,
+		Video:  &models.InputFileString{Data: cache.VerticalVideoFileID},
+	})
+	if err != nil {
+		log.Printf("Ошибка отправки вертикального видео из кэша: %v", err)
+		b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "❌ Ошибка отправки видео.",
+		})
+	} else {
+		log.Printf("✅ Вертикальное видео отправлено из кэша")
+	}
+}
+
 // handleVoiceMessage обрабатывает голосовое сообщение
 func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *models.Message, voice *models.Voice, isPaid bool, authorOverride *Author, voiceFileUniqueID string) {
 	// Определяем автора голосового сообщения
@@ -347,6 +423,18 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 				Author:       *author,
 			})
 
+			// Определяем, есть ли вертикальное видео в кэше
+			var buttonText, buttonCallback string
+			if cache.VerticalVideoFileID != "" {
+				// Вертикальное видео есть в кэше — бесплатная кнопка
+				buttonText = "📱 Получить вертикальное видео (бесплатно)"
+				buttonCallback = "vertcache:" + vertKey
+			} else {
+				// Вертикального нет — платная кнопка
+				buttonText = fmt.Sprintf("📱 Сделать вертикальное видео (%d⭐)", h.Config.VerticalCost)
+				buttonCallback = "vert:" + vertKey
+			}
+
 			// Отправляем видео из кэша по file_id
 			_, err := b.SendVideo(ctx, &bot.SendVideoParams{
 				ChatID: msg.Chat.ID,
@@ -355,8 +443,8 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 					InlineKeyboard: [][]models.InlineKeyboardButton{
 						{
 							{
-								Text:         fmt.Sprintf("📱 Сделать вертикальное видео (%d⭐)", h.Config.VerticalCost),
-								CallbackData: "vert:" + vertKey,
+								Text:         buttonText,
+								CallbackData: buttonCallback,
 							},
 						},
 					},
