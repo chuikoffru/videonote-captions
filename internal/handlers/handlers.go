@@ -122,11 +122,13 @@ func (h *Handler) StatsHandler(ctx context.Context, b *bot.Bot, update *models.U
 👥 Пользователей: %d
 🎬 Бесплатных видео: %d
 💳 Запросов оплаты: %d
-✅ Оплаченных видео: %d`,
+✅ Оплаченных видео: %d
+📱 Вертикальных видео: %d`,
 		userCount,
 		stats.TotalFreeVideos,
 		stats.TotalPaymentRequests,
 		stats.TotalPaidVideos,
+		stats.TotalVerticalVideos,
 	)
 
 	b.SendMessage(ctx, &bot.SendMessageParams{
@@ -752,7 +754,7 @@ func (h *Handler) handleVerticalVideoRequest(ctx context.Context, b *bot.Bot, ms
 
 	// Логируем в БД
 	if h.DB != nil {
-		h.DB.LogPaidVideo(msg.From.ID, 0, "")
+		h.DB.LogVerticalVideo()
 	}
 
 	// Удаляем статусное сообщение

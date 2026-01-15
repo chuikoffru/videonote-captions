@@ -35,6 +35,7 @@ type Stats struct {
 	ID                   uint `gorm:"primaryKey"`
 	TotalFreeVideos      int  // Видео до FREE_SECONDS
 	TotalPaidVideos      int  // Оплаченные видео
+	TotalVerticalVideos  int  `gorm:"default:0"` // Вертикальные видео
 	TotalPaymentRequests int  // Запрошенные платежи (инвойсы)
 	UpdatedAt            time.Time
 }
@@ -152,6 +153,11 @@ func (d *DB) LogPaidVideo(userID int64, duration int, videoFileID string) error 
 // LogPaymentRequest логирует запрос оплаты (отправленный инвойс)
 func (d *DB) LogPaymentRequest() error {
 	return d.Model(&Stats{}).Where("id = 1").Update("total_payment_requests", gorm.Expr("total_payment_requests + 1")).Error
+}
+
+// LogVerticalVideo логирует создание вертикального видео
+func (d *DB) LogVerticalVideo() error {
+	return d.Model(&Stats{}).Where("id = 1").Update("total_vertical_videos", gorm.Expr("total_vertical_videos + 1")).Error
 }
 
 // GetStats возвращает статистику
