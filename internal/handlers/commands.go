@@ -38,6 +38,35 @@ func (h *Handler) StartHandler(ctx context.Context, b *bot.Bot, update *models.U
 	}
 }
 
+// HelpHandler обрабатывает команду /help
+func (h *Handler) HelpHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil {
+		return
+	}
+
+	helpText := `🤖 <b>Как пользоваться ботом:</b>
+
+1️⃣ <b>Отправь голосовое сообщение</b> (или перешли его от другого пользователя/канала).
+2️⃣ Бот создаст видео с визуализацией звука, аватаркой и субтитрами.
+3️⃣ <b>Первые 60 секунд</b> обработки бесплатно для каждого сообщения.
+4️⃣ Если сообщение длиннее, можно оплатить продолжение за Telegram Stars (10 звезд за минуту).
+
+📹 <b>Дополнительно:</b>
+• Бот умеет создавать <b>вертикальные видео</b> (особенно круто для Stories/Reels/Shorts).
+• Нажми кнопку "📱 Сделать вертикально" под готовым видео, чтобы получить вертикальную версию бесплатно (если она закеширована) или сгенерировать новую.
+
+🚀 <b>Совет:</b> Пересылай голосовые сообщения из других чатов — бот возьмет аватарку и имя оригинального автора!`
+
+	_, err := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    update.Message.Chat.ID,
+		Text:      helpText,
+		ParseMode: models.ParseModeHTML,
+	})
+	if err != nil {
+		log.Printf("Failed to send help message: %v", err)
+	}
+}
+
 // StatsHandler обрабатывает команду /stats (только для админа)
 func (h *Handler) StatsHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil || update.Message.From == nil {
@@ -171,5 +200,51 @@ func (h *Handler) BroadcastHandler(ctx context.Context, b *bot.Bot, update *mode
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: update.Message.Chat.ID,
 		Text:   fmt.Sprintf("✅ Рассылка завершена!\n\nУспешно: %d\nОшибок: %d", success, failed),
+	})
+}
+
+// UsageHandler обрабатывает команду /usage (только для админа)
+func (h *Handler) UsageHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil || update.Message.From == nil {
+		return
+	}
+
+	// Проверяем, что это админ
+	if update.Message.From.ID != h.Config.AdminID {
+		return
+	}
+
+	if h.DB == nil {
+		b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: update.Message.Chat.ID,
+			Text:   "❌ База данных не инициализирована.",
+		})
+		return
+	}
+
+	users0, users1, usersMore, err := h.DB.GetUsageStats()
+	if err != nil {
+		log.Printf("Failed to get usage stats: %v", err)
+		b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: update.Message.Chat.ID,
+			Text:   "❌ Ошибка получения статистики использования.",
+		})
+		return
+	}
+
+	usageText := fmt.Sprintf(`📊 *Статистика использования*
+
+0️⃣ Ни одного видео: %d пользователей
+1️⃣ Только 1 видео: %d пользователей
+🚀 Больше 1 видео: %d пользователей`,
+		users0,
+		users1,
+		usersMore,
+	)
+
+	b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    update.Message.Chat.ID,
+		Text:      usageText,
+		ParseMode: models.ParseModeMarkdown,
 	})
 }

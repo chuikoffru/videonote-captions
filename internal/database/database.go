@@ -234,3 +234,50 @@ func (d *DB) SaveVerticalVideoCache(voiceFileUniqueID, verticalVideoFileID strin
 	// Обновляем существующий
 	return d.Model(&cache).Update("vertical_video_file_id", verticalVideoFileID).Error
 }
+
+// GetUsageStats возвращает статистику использования бота пользователями
+func (d *DB) GetUsageStats() (users0, users1, usersMore int64, err error) {
+	// 1. Получаем общее количество пользователей
+	var totalUsers int64
+	if err := d.Model(&User{}).Count(&totalUsers).Error; err != nil {
+		return 0, 0, 0, err
+	}
+
+	// 2. Получаем количество видео на каждого пользователя
+	type Result struct {
+		UserID int64
+		Count  int64
+	}
+	var results []Result
+	if err := d.Model(&VideoLog{}).Select("user_id, count(*) as count").Group("user_id").Scan(&results).Error; err != nil {
+		return 0, 0, 0, err
+	}
+
+	// 3. Считаем категории
+	var withVideoCount int64 = 0
+	for _, res := range results {
+		// Мы считаем уникальных пользователей, у которых есть видео.
+		// Result.UserID - это telegram_id.
+		// Если в video_logs есть записи для юзеров, которых нет в users (маловероятно, но возможно если база чистилась неравномерно),
+		// это может немного исказить "0 videos", но в целом логика верная.
+
+		withVideoCount++
+
+		if res.Count == 1 {
+			users1++
+		} else if res.Count > 1 {
+			usersMore++
+		}
+	}
+
+	// Пользователи без видео = Всего пользователей - Пользователи с видео
+	users0 = totalUsers - withVideoCount
+
+	// Если вдруг video_logs содержит ID которых нет в users, users0 может стать отрицательным.
+	// Нормализуем на всякий случай.
+	if users0 < 0 {
+		users0 = 0
+	}
+
+	return users0, users1, usersMore, nil
+}

@@ -58,6 +58,12 @@ func main() {
 				return
 			}
 
+			// Обрабатываем команду /help
+			if update.Message != nil && update.Message.Text == "/help" {
+				h.HelpHandler(ctx, b, update)
+				return
+			}
+
 			// Обрабатываем команду /stats (только для админа)
 			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/stats") {
 				h.StatsHandler(ctx, b, update)
@@ -67,6 +73,12 @@ func main() {
 			// Обрабатываем команду /broadcast (только для админа)
 			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/broadcast") {
 				h.BroadcastHandler(ctx, b, update)
+				return
+			}
+
+			// Обрабатываем команду /usage (только для админа)
+			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/usage") {
+				h.UsageHandler(ctx, b, update)
 				return
 			}
 
