@@ -62,8 +62,8 @@ func buildVerticalFilter(width, height int, escapedSubtitlePath, username string
 		// Используем третий input как фон, масштабируем под размер видео
 		bgSource = fmt.Sprintf(`[2:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d[bg_grad];`, width, height, width, height)
 	} else {
-		// Дефолтный тёмный фон
-		bgSource = fmt.Sprintf(`color=c=0x1a1a2e:s=%dx%d:d=10[bg];`+
+		// Дефолтный тёмный фон (без ограничения длительности - будет использована длина аудио через -shortest)
+		bgSource = fmt.Sprintf(`color=c=0x1a1a2e:s=%dx%d[bg];`+
 			`[bg]drawbox=x=0:y=0:w=%d:h=%d:color=0x16213e:t=fill[bg_grad];`, width, height, width, height)
 	}
 

@@ -66,6 +66,52 @@ func escapeSubtitlePath(path string) string {
 	return strings.ReplaceAll(escaped, "\\", "/")
 }
 
+// calculateOptimalBitrate рассчитывает оптимальный битрейт для соблюдения лимита Telegram (50 MB)
+// Возвращает битрейт в формате "XXXXk"
+func calculateOptimalBitrate(audioPath string, requestedBitrate string, audioBitrate int) string {
+	duration := getAudioDuration(audioPath)
+	if duration <= 0 {
+		return requestedBitrate
+	}
+
+	// Лимит Telegram: 50 MB = 50 * 1024 * 1024 * 8 бит = 419430400 бит
+	// Оставляем запас 10% для заголовков и метаданных
+	const maxFileSizeBits = 419430400 * 0.9
+
+	// Аудио занимает примерно audioBitrate * duration бит
+	audioBits := float64(audioBitrate) * 1000 * duration
+
+	// Оставшиеся биты для видео
+	availableVideoBits := maxFileSizeBits - audioBits
+	if availableVideoBits <= 0 {
+		// Если аудио уже превышает лимит, используем минимальный битрейт
+		return "500k"
+	}
+
+	// Вычисляем максимально допустимый битрейт видео (в kbps)
+	maxVideoBitrate := int(availableVideoBits / duration / 1000)
+
+	// Парсим запрошенный битрейт
+	requestedValue := 2000 // default
+	if len(requestedBitrate) > 1 {
+		if val, err := strconv.Atoi(strings.TrimSuffix(requestedBitrate, "k")); err == nil {
+			requestedValue = val
+		}
+	}
+
+	// Используем меньший из запрошенного и максимального
+	finalBitrate := requestedValue
+	if maxVideoBitrate < requestedValue {
+		finalBitrate = maxVideoBitrate
+		// Минимальный битрейт 500k для приемлемого качества
+		if finalBitrate < 500 {
+			finalBitrate = 500
+		}
+	}
+
+	return fmt.Sprintf("%dk", finalBitrate)
+}
+
 // generateVideoWithFilter создаёт видео с указанным complex filter
 func generateVideoWithFilter(cfg VideoConfig, complexFilter string) (string, error) {
 	tempDir := "temp"
@@ -74,6 +120,10 @@ func generateVideoWithFilter(cfg VideoConfig, complexFilter string) (string, err
 	}
 
 	outputPath := filepath.Join(tempDir, fmt.Sprintf("%s_%d.mp4", cfg.OutputPrefix, time.Now().UnixNano()))
+
+	// Рассчитываем оптимальный битрейт для соблюдения лимита Telegram (50 MB)
+	// Аудио битрейт 192k
+	optimalBitrate := calculateOptimalBitrate(cfg.AudioPath, cfg.Bitrate, 192)
 
 	// Базовые аргументы
 	args := []string{
@@ -94,7 +144,9 @@ func generateVideoWithFilter(cfg VideoConfig, complexFilter string) (string, err
 		"-preset", "medium",
 		"-crf", "23",
 		"-pix_fmt", "yuv420p",
-		"-b:v", cfg.Bitrate,
+		"-b:v", optimalBitrate,
+		"-maxrate", optimalBitrate,
+		"-bufsize", optimalBitrate,
 		"-r", strconv.Itoa(cfg.FPS),
 		"-c:a", "aac",
 		"-b:a", "192k",
