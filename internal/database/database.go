@@ -44,11 +44,14 @@ type Stats struct {
 
 // VoiceCache хранит кэш обработанных голосовых сообщений
 type VoiceCache struct {
-	ID                  uint   `gorm:"primaryKey"`
-	VoiceFileUniqueID   string `gorm:"uniqueIndex"` // file_unique_id голосового сообщения
-	VideoFileID         string // file_id горизонтального видео
-	VerticalVideoFileID string // file_id вертикального видео (опционально)
-	CreatedAt           time.Time
+	ID                   uint   `gorm:"primaryKey"`
+	VoiceFileUniqueID    string `gorm:"uniqueIndex"` // file_unique_id голосового сообщения
+	VideoFileID          string // file_id горизонтального видео
+	VerticalVideoFileID  string // file_id вертикального видео (опционально)
+	TranscriptionJSON    string // JSON результата транскрипции
+	HorizontalBackground string // Путь к фону при генерации горизонтального видео
+	VerticalBackground   string // Путь к фону при генерации вертикального видео
+	CreatedAt            time.Time
 }
 
 // DB обёртка над gorm.DB
@@ -301,4 +304,72 @@ func (d *DB) GetUserBackgrounds(telegramID int64) (horizontal, vertical string, 
 		return "", "", err
 	}
 	return user.HorizontalBackground, user.VerticalBackground, nil
+}
+
+// SaveCacheWithTranscription сохраняет кэш с транскрипцией и информацией о фоне
+func (d *DB) SaveCacheWithTranscription(voiceFileUniqueID, videoFileID, transcriptionJSON, horizontalBg string) error {
+	var cache VoiceCache
+	err := d.Where("voice_file_unique_id = ?", voiceFileUniqueID).First(&cache).Error
+	if err == gorm.ErrRecordNotFound {
+		cache = VoiceCache{
+			VoiceFileUniqueID:    voiceFileUniqueID,
+			VideoFileID:          videoFileID,
+			TranscriptionJSON:    transcriptionJSON,
+			HorizontalBackground: horizontalBg,
+		}
+		return d.Create(&cache).Error
+	}
+	if err != nil {
+		return err
+	}
+	return d.Model(&cache).Updates(map[string]interface{}{
+		"video_file_id":         videoFileID,
+		"transcription_json":    transcriptionJSON,
+		"horizontal_background": horizontalBg,
+	}).Error
+}
+
+// SaveVerticalCacheWithBackground сохраняет кэш вертикального видео с фоном
+func (d *DB) SaveVerticalCacheWithBackground(voiceFileUniqueID, verticalVideoFileID, verticalBg string) error {
+	var cache VoiceCache
+	err := d.Where("voice_file_unique_id = ?", voiceFileUniqueID).First(&cache).Error
+	if err == gorm.ErrRecordNotFound {
+		cache = VoiceCache{
+			VoiceFileUniqueID:   voiceFileUniqueID,
+			VerticalVideoFileID: verticalVideoFileID,
+			VerticalBackground:  verticalBg,
+		}
+		return d.Create(&cache).Error
+	}
+	if err != nil {
+		return err
+	}
+	return d.Model(&cache).Updates(map[string]interface{}{
+		"vertical_video_file_id": verticalVideoFileID,
+		"vertical_background":    verticalBg,
+	}).Error
+}
+
+// InvalidateVideoCache очищает file_id видео (при изменении фона), сохраняя транскрипцию
+func (d *DB) InvalidateVideoCache(voiceFileUniqueID string, invalidateHorizontal, invalidateVertical bool) error {
+	var cache VoiceCache
+	err := d.Where("voice_file_unique_id = ?", voiceFileUniqueID).First(&cache).Error
+	if err != nil {
+		return err
+	}
+
+	updates := map[string]interface{}{}
+	if invalidateHorizontal {
+		updates["video_file_id"] = ""
+		updates["horizontal_background"] = ""
+	}
+	if invalidateVertical {
+		updates["vertical_video_file_id"] = ""
+		updates["vertical_background"] = ""
+	}
+
+	if len(updates) > 0 {
+		return d.Model(&cache).Updates(updates).Error
+	}
+	return nil
 }

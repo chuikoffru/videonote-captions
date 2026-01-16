@@ -10,6 +10,7 @@ import (
 
 	"telegram-voice-video-bot/internal/audio"
 	"telegram-voice-video-bot/internal/avatar"
+	"telegram-voice-video-bot/internal/transcription"
 	"telegram-voice-video-bot/internal/video"
 
 	"github.com/go-telegram/bot"
@@ -191,6 +192,8 @@ func (h *Handler) VerticalCacheCallbackHandler(ctx context.Context, b *bot.Bot, 
 
 // handleVerticalVideoRequest обрабатывает запрос на создание вертикального видео
 func (h *Handler) handleVerticalVideoRequest(ctx context.Context, b *bot.Bot, msg *models.Message, voiceFileID string, voiceFileUniqueID string, author *Author) {
+	log.Printf("Начинаем генерацию вертикального видео для voice_file_unique_id=%s", voiceFileUniqueID)
+
 	// Проверяем кэш вертикального видео
 	if h.DB != nil && voiceFileUniqueID != "" {
 		cache, err := h.DB.GetCachedVideo(voiceFileUniqueID)
@@ -233,12 +236,29 @@ func (h *Handler) handleVerticalVideoRequest(ctx context.Context, b *bot.Bot, ms
 	}
 	defer os.Remove(audioPath)
 
-	// Транскрибируем
-	h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "📝 Создаю субтитры...")
-	transcriptionResult, err := h.Transcriber.TranscribeAudio(ctx, audioPath)
-	if err != nil {
-		log.Printf("Failed to transcribe: %v", err)
-		transcriptionResult = nil
+	// Проверяем кэш транскрипции
+	var cachedTranscription *transcription.Result
+	if h.DB != nil && voiceFileUniqueID != "" {
+		cache, _ := h.DB.GetCachedVideo(voiceFileUniqueID)
+		if cache != nil && cache.TranscriptionJSON != "" {
+			cachedTranscription, _ = transcription.ResultFromJSON(cache.TranscriptionJSON)
+		}
+	}
+
+	// Транскрибируем (или используем кэш)
+	var transcriptionResult *transcription.Result
+	if cachedTranscription != nil {
+		log.Printf("✅ Используем кэшированную транскрипцию для вертикального видео")
+		transcriptionResult = cachedTranscription
+		h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "📝 Субтитры из кэша...")
+	} else {
+		h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "📝 Создаю субтитры...")
+		var err error
+		transcriptionResult, err = h.Transcriber.TranscribeAudio(ctx, audioPath)
+		if err != nil {
+			log.Printf("Failed to transcribe: %v", err)
+			transcriptionResult = nil
+		}
 	}
 
 	// Скачиваем аватар
@@ -304,13 +324,21 @@ func (h *Handler) handleVerticalVideoRequest(ctx context.Context, b *bot.Bot, ms
 		log.Printf("Failed to send vertical video: %v", err)
 	}
 
-	// Сохраняем в кэш
-	if h.DB != nil && voiceFileUniqueID != "" && videoResult != nil && videoResult.Video != nil {
-		err := h.DB.SaveVerticalVideoCache(voiceFileUniqueID, videoResult.Video.FileID)
-		if err != nil {
-			log.Printf("Ошибка сохранения кэша вертикального видео: %v", err)
+	// Сохраняем в кэш с фоном
+	if h.DB != nil && voiceFileUniqueID != "" && videoResult != nil {
+		videoFileID := ""
+		if videoResult.Video != nil {
+			videoFileID = videoResult.Video.FileID
+		}
+		if videoFileID != "" {
+			err := h.DB.SaveVerticalCacheWithBackground(voiceFileUniqueID, videoFileID, backgroundPath)
+			if err != nil {
+				log.Printf("Ошибка сохранения кэша вертикального видео: %v", err)
+			} else {
+				log.Printf("✅ Сохранён кэш вертикального видео для voice_file_unique_id=%s", voiceFileUniqueID)
+			}
 		} else {
-			log.Printf("✅ Сохранён кэш вертикального видео для voice_file_unique_id=%s", voiceFileUniqueID)
+			log.Printf("⚠️ Не удалось получить file_id вертикального видео")
 		}
 	}
 

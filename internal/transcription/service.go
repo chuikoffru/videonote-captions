@@ -2,6 +2,7 @@ package transcription
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -89,4 +90,26 @@ func (s *Service) TranscribeAudio(ctx context.Context, audioPath string) (*Resul
 	}
 
 	return result, nil
+}
+
+// ToJSON сериализует результат транскрипции в JSON
+func (r *Result) ToJSON() (string, error) {
+	data, err := json.Marshal(r)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// ResultFromJSON десериализует результат транскрипции из JSON
+func ResultFromJSON(data string) (*Result, error) {
+	if data == "" {
+		return nil, nil
+	}
+	var result Result
+	err := json.Unmarshal([]byte(data), &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
