@@ -19,16 +19,17 @@ type ProgressCallback func(percent int)
 
 // VideoConfig содержит параметры для генерации видео
 type VideoConfig struct {
-	AudioPath     string
-	AvatarPath    string
-	Transcription *transcription.Result
-	Username      string
-	Width         int
-	Height        int
-	FPS           int
-	Bitrate       string
-	OnProgress    ProgressCallback
-	OutputPrefix  string
+	AudioPath      string
+	AvatarPath     string
+	BackgroundPath string // Путь к кастомному фону (опционально)
+	Transcription  *transcription.Result
+	Username       string
+	Width          int
+	Height         int
+	FPS            int
+	Bitrate        string
+	OnProgress     ProgressCallback
+	OutputPrefix   string
 }
 
 // FontConfig содержит пути и имена шрифтов
@@ -74,9 +75,18 @@ func generateVideoWithFilter(cfg VideoConfig, complexFilter string) (string, err
 
 	outputPath := filepath.Join(tempDir, fmt.Sprintf("%s_%d.mp4", cfg.OutputPrefix, time.Now().UnixNano()))
 
+	// Базовые аргументы
 	args := []string{
 		"-i", cfg.AudioPath,
 		"-i", cfg.AvatarPath,
+	}
+
+	// Добавляем фон как третий input если он указан
+	if cfg.BackgroundPath != "" {
+		args = append(args, "-i", cfg.BackgroundPath)
+	}
+
+	args = append(args,
 		"-filter_complex", complexFilter,
 		"-map", "[final]",
 		"-map", "0:a",
@@ -91,7 +101,7 @@ func generateVideoWithFilter(cfg VideoConfig, complexFilter string) (string, err
 		"-shortest",
 		"-y",
 		outputPath,
-	}
+	)
 
 	return runFFmpegWithProgress(args, cfg.AudioPath, cfg.OnProgress, outputPath)
 }

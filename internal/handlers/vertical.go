@@ -254,10 +254,20 @@ func (h *Handler) handleVerticalVideoRequest(ctx context.Context, b *bot.Bot, ms
 	// Генерируем вертикальное видео
 	h.updateStatus(ctx, b, msg.Chat.ID, statusMsg.ID, "🎬 Создаю вертикальное видео: 0%")
 
+	// Получаем кастомный фон пользователя
+	var backgroundPath string
+	if h.DB != nil && msg.From != nil {
+		_, vertBg, err := h.DB.GetUserBackgrounds(msg.From.ID)
+		if err == nil && vertBg != "" {
+			backgroundPath = vertBg
+		}
+	}
+
 	lastUpdatePercent := 0
 	videoPath, err := video.GenerateVerticalVideo(
 		audioPath,
 		avatarPath,
+		backgroundPath,
 		transcriptionResult,
 		author.Username,
 		h.Config.VideoFPS,

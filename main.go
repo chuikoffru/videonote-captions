@@ -82,6 +82,12 @@ func main() {
 				return
 			}
 
+			// Обрабатываем фото (кастомные фоны)
+			if update.Message != nil && update.Message.Photo != nil {
+				h.PhotoHandler(ctx, b, update)
+				return
+			}
+
 			// Обрабатываем голосовые сообщения
 			if update.Message != nil && update.Message.Voice != nil {
 				h.VoiceHandler(ctx, b, update)

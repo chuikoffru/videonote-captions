@@ -11,13 +11,15 @@ import (
 
 // User представляет пользователя бота
 type User struct {
-	ID         uint  `gorm:"primaryKey"`
-	TelegramID int64 `gorm:"uniqueIndex"`
-	Username   string
-	FirstName  string
-	LastName   string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID                   uint  `gorm:"primaryKey"`
+	TelegramID           int64 `gorm:"uniqueIndex"`
+	Username             string
+	FirstName            string
+	LastName             string
+	HorizontalBackground string // Путь к кастомному горизонтальному фону
+	VerticalBackground   string // Путь к кастомному вертикальному фону
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // VideoLog хранит лог созданных видео
@@ -280,4 +282,23 @@ func (d *DB) GetUsageStats() (users0, users1, usersMore int64, err error) {
 	}
 
 	return users0, users1, usersMore, nil
+}
+
+// UpdateUserBackground обновляет путь к фону пользователя
+func (d *DB) UpdateUserBackground(telegramID int64, isHorizontal bool, path string) error {
+	field := "vertical_background"
+	if isHorizontal {
+		field = "horizontal_background"
+	}
+	return d.Model(&User{}).Where("telegram_id = ?", telegramID).Update(field, path).Error
+}
+
+// GetUserBackgrounds возвращает пути к фонам пользователя
+func (d *DB) GetUserBackgrounds(telegramID int64) (horizontal, vertical string, err error) {
+	var user User
+	err = d.Where("telegram_id = ?", telegramID).First(&user).Error
+	if err != nil {
+		return "", "", err
+	}
+	return user.HorizontalBackground, user.VerticalBackground, nil
 }

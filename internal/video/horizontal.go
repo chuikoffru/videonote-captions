@@ -8,7 +8,7 @@ import (
 )
 
 // GenerateVideo создаёт горизонтальное видео (16:9) с визуализацией аудио, аватаркой и субтитрами
-func GenerateVideo(audioPath, avatarPath string, transcriptionResult *transcription.Result, username string, width, height, fps int, bitrate string, onProgress ProgressCallback) (string, error) {
+func GenerateVideo(audioPath, avatarPath, backgroundPath string, transcriptionResult *transcription.Result, username string, width, height, fps int, bitrate string, onProgress ProgressCallback) (string, error) {
 	tempDir := "temp"
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create temp dir: %w", err)
@@ -22,27 +22,28 @@ func GenerateVideo(audioPath, avatarPath string, transcriptionResult *transcript
 	defer os.Remove(subtitlePath)
 
 	// Строим фильтр
-	complexFilter := buildHorizontalFilter(width, height, escapedSubtitlePath, username)
+	complexFilter := buildHorizontalFilter(width, height, escapedSubtitlePath, username, backgroundPath != "")
 
 	// Генерируем видео
 	cfg := VideoConfig{
-		AudioPath:     audioPath,
-		AvatarPath:    avatarPath,
-		Transcription: transcriptionResult,
-		Username:      username,
-		Width:         width,
-		Height:        height,
-		FPS:           fps,
-		Bitrate:       bitrate,
-		OnProgress:    onProgress,
-		OutputPrefix:  "video",
+		AudioPath:      audioPath,
+		AvatarPath:     avatarPath,
+		BackgroundPath: backgroundPath,
+		Transcription:  transcriptionResult,
+		Username:       username,
+		Width:          width,
+		Height:         height,
+		FPS:            fps,
+		Bitrate:        bitrate,
+		OnProgress:     onProgress,
+		OutputPrefix:   "video",
 	}
 
 	return generateVideoWithFilter(cfg, complexFilter)
 }
 
 // buildHorizontalFilter строит complex filter для горизонтального видео
-func buildHorizontalFilter(width, height int, escapedSubtitlePath, username string) string {
+func buildHorizontalFilter(width, height int, escapedSubtitlePath, username string, hasBackground bool) string {
 	font := getFontConfig()
 	displayUsername := formatUsername(username)
 
@@ -50,13 +51,20 @@ func buildHorizontalFilter(width, height int, escapedSubtitlePath, username stri
 	avatarX := (width - avatarSize) / 2
 	waveformHeight := 120
 
-	return fmt.Sprintf(
-		// 1. Фон
-		`color=c=0x1a1a2e:s=%dx%d:d=10[bg];`+
-			`[bg]drawbox=x=0:y=0:w=%d:h=%d:color=0x16213e:t=fill[bg_grad];`+
+	// Выбираем источник фона
+	var bgSource string
+	if hasBackground {
+		// Используем третий input как фон, масштабируем под размер видео
+		bgSource = fmt.Sprintf(`[2:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d[bg_grad];`, width, height, width, height)
+	} else {
+		// Дефолтный тёмный фон
+		bgSource = fmt.Sprintf(`color=c=0x1a1a2e:s=%dx%d:d=10[bg];`+
+			`[bg]drawbox=x=0:y=0:w=%d:h=%d:color=0x16213e:t=fill[bg_grad];`, width, height, width, height)
+	}
 
-			// 2. Аватар - круглый с рамкой
-			`[1:v]scale=%d:%d,format=rgba,`+
+	return bgSource + fmt.Sprintf(
+		// 2. Аватар - круглый с рамкой
+		`[1:v]scale=%d:%d,format=rgba,`+
 			`geq=r='if(gt(hypot(X-%d,Y-%d),%d),0,p(X,Y))':`+
 			`g='if(gt(hypot(X-%d,Y-%d),%d),255,p(X,Y))':`+
 			`b='if(gt(hypot(X-%d,Y-%d),%d),255,p(X,Y))':`+
@@ -89,8 +97,6 @@ func buildHorizontalFilter(width, height int, escapedSubtitlePath, username stri
 			`[with_subs]drawtext=fontfile=%s:text='@AudioVisualizerBot':fontcolor=0x00ffff:fontsize=20:x=(w-text_w)/2:y=h-30[final]`,
 
 		// Параметры
-		width, height,
-		width, height,
 		avatarSize, avatarSize,
 		avatarSize/2, avatarSize/2, avatarSize/2-6,
 		avatarSize/2, avatarSize/2, avatarSize/2-6,

@@ -179,9 +179,19 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 	lastUpdatePercent := 0
 	log.Printf("Video Target: %s", author.Username)
 
+	// Получаем кастомный фон пользователя
+	var backgroundPath string
+	if h.DB != nil && msg.From != nil {
+		horizBg, _, err := h.DB.GetUserBackgrounds(msg.From.ID)
+		if err == nil && horizBg != "" {
+			backgroundPath = horizBg
+		}
+	}
+
 	videoPath, err := video.GenerateVideo(
 		audioPath,
 		avatarPath,
+		backgroundPath,
 		transcriptionResult,
 		author.Username,
 		h.Config.VideoWidth,
