@@ -76,12 +76,6 @@ func main() {
 				return
 			}
 
-			// Обрабатываем команду /balance
-			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/balance") {
-				h.BalanceHandler(ctx, b, update)
-				return
-			}
-
 			// Обрабатываем команду /buy
 			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/buy") {
 				h.BuyHandler(ctx, b, update)

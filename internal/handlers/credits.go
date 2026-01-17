@@ -23,42 +23,6 @@ type CreditPurchaseData struct {
 	Timestamp int64
 }
 
-// BalanceHandler обрабатывает команду /balance
-func (h *Handler) BalanceHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.Message == nil || update.Message.From == nil {
-		return
-	}
-
-	userID := update.Message.From.ID
-
-	// Регистрируем пользователя если ещё не зарегистрирован
-	if h.DB != nil {
-		h.DB.GetOrCreateUser(userID, update.Message.From.Username, update.Message.From.FirstName, update.Message.From.LastName)
-	}
-
-	var credits int64
-	var err error
-	if h.DB != nil {
-		credits, err = h.DB.GetUserCredits(userID)
-		if err != nil {
-			log.Printf("Ошибка получения баланса: %v", err)
-			credits = 0
-		}
-	}
-
-	// Форматируем слово "кредит" с правильным окончанием
-	creditWord := formatCreditsWord(credits)
-
-	text := fmt.Sprintf("💰 *Ваш баланс:* %d %s\n\n", credits, creditWord)
-	text += "Используйте /buy для пополнения баланса"
-
-	b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:    update.Message.Chat.ID,
-		Text:      text,
-		ParseMode: models.ParseModeMarkdown,
-	})
-}
-
 // sendInsufficientCreditsMessage отправляет сообщение о недостатке кредитов с кнопками покупки
 func (h *Handler) sendInsufficientCreditsMessage(ctx context.Context, b *bot.Bot, chatID int64, needed int, balance int64) {
 	text := fmt.Sprintf("❌ <b>Недостаточно кредитов</b>\n\n"+
