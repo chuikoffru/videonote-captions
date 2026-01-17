@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"strings"
-	"time"
 
 	"telegram-voice-video-bot/internal/audio"
 	"telegram-voice-video-bot/internal/avatar"
@@ -17,7 +16,167 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
-// VerticalCallbackHandler обрабатывает нажатие на кнопку "Сделать вертикальное видео"
+// HorizontalCallbackHandler обрабатывает нажатие на кнопку "Горизонтальное видео"
+func (h *Handler) HorizontalCallbackHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	log.Printf("HorizontalCallbackHandler called")
+
+	if update.CallbackQuery == nil {
+		log.Printf("CallbackQuery is nil")
+		return
+	}
+
+	log.Printf("CallbackQuery data: %s", update.CallbackQuery.Data)
+
+	data := update.CallbackQuery.Data
+	if !strings.HasPrefix(data, "horiz:") {
+		log.Printf("Data does not start with 'horiz:': %s", data)
+		return
+	}
+
+	// Извлекаем ключ из callback_data
+	videoKey := strings.TrimPrefix(data, "horiz:")
+
+	// Получаем данные из хранилища
+	value, ok := VerticalRequests.Load(videoKey)
+	if !ok {
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "❌ Запрос устарел. Отправьте голосовое сообщение снова.",
+			ShowAlert:       true,
+		})
+		return
+	}
+	log.Printf("Found horizontal request with key: %s", videoKey)
+	orderData := value.(OrderData)
+
+	// Получаем chat_id из callback query
+	chatID := update.CallbackQuery.From.ID
+	userID := update.CallbackQuery.From.ID
+	if update.CallbackQuery.Message.Message != nil {
+		chatID = update.CallbackQuery.Message.Message.Chat.ID
+	}
+
+	// Проверяем, является ли пользователь админом
+	isAdmin := userID == h.Config.AdminID
+
+	// Скачиваем аудио чтобы получить длительность для расчёта стоимости
+	audioPath, err := audio.DownloadAudio(ctx, b, orderData.FileID, h.Config.BotToken)
+	if err != nil {
+		log.Printf("Failed to get audio for duration check: %v", err)
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "❌ Ошибка загрузки аудио.",
+			ShowAlert:       true,
+		})
+		return
+	}
+
+	// Получаем длительность
+	duration := video.GetAudioDuration(audioPath)
+	if duration <= 0 {
+		log.Printf("Failed to get audio duration")
+		os.Remove(audioPath)
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "❌ Ошибка получения длительности аудио.",
+			ShowAlert:       true,
+		})
+		return
+	}
+
+	// Рассчитываем стоимость в кредитах
+	durationSec := int(duration)
+	paidSeconds := durationSec - h.Config.FreeSeconds
+	if paidSeconds < 0 {
+		paidSeconds = 0
+	}
+	paidMinutes := (paidSeconds + 59) / 60
+	creditsCost := paidMinutes * h.Config.CreditsPerMinute
+
+	// Если не бесплатно и не админ, проверяем/списываем кредиты
+	if creditsCost > 0 && !isAdmin {
+		if h.DB == nil {
+			b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+				CallbackQueryID: update.CallbackQuery.ID,
+				Text:            "❌ Ошибка: база данных недоступна.",
+				ShowAlert:       true,
+			})
+			os.Remove(audioPath)
+			return
+		}
+
+		// Проверяем баланс
+		balance, err := h.DB.GetUserCredits(userID)
+		if err != nil || balance < int64(creditsCost) {
+			b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+				CallbackQueryID: update.CallbackQuery.ID,
+			})
+			h.sendInsufficientCreditsMessage(ctx, b, chatID, creditsCost, balance)
+			os.Remove(audioPath)
+			return
+		}
+
+		// Списываем кредиты
+		err = h.DB.SpendCredits(userID, int64(creditsCost), fmt.Sprintf("Горизонтальное видео (%d сек)", durationSec))
+		if err != nil {
+			log.Printf("Failed to spend credits: %v", err)
+			b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+				CallbackQueryID: update.CallbackQuery.ID,
+				Text:            "❌ Ошибка списания кредитов.",
+				ShowAlert:       true,
+			})
+			os.Remove(audioPath)
+			return
+		}
+		log.Printf("Списано %d кредитов с пользователя %d за горизонтальное видео", creditsCost, userID)
+	}
+
+	// Удаляем временный аудио файл — он скачается заново в handleVoiceMessage
+	os.Remove(audioPath)
+
+	// Отвечаем на callback
+	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: update.CallbackQuery.ID,
+		Text:            "🎬 Начинаю генерацию горизонтального видео...",
+	})
+
+	// Удаляем сообщение с кнопками
+	if update.CallbackQuery.Message.Message != nil {
+		b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+			ChatID:    chatID,
+			MessageID: update.CallbackQuery.Message.Message.ID,
+		})
+	}
+
+	// Создаём фейковое сообщение для передачи в handleVoiceMessage
+	fromUser := update.CallbackQuery.From
+	fakeMsg := &models.Message{
+		Chat: models.Chat{ID: chatID},
+		From: &fromUser,
+	}
+	fakeVoice := &models.Voice{
+		FileID:       orderData.FileID,
+		FileUniqueID: orderData.FileUniqueID,
+		Duration:     durationSec,
+	}
+
+	// Проверяем кэш транскрипции перед генерацией
+	var cachedTranscription *transcription.Result
+	if h.DB != nil && orderData.FileUniqueID != "" {
+		cache, _ := h.DB.GetCachedVideo(orderData.FileUniqueID)
+		if cache != nil && cache.TranscriptionJSON != "" {
+			cachedTranscription, _ = transcription.ResultFromJSON(cache.TranscriptionJSON)
+			if cachedTranscription != nil {
+				log.Printf("✅ Используем кэшированную транскрипцию для горизонтального видео")
+			}
+		}
+	}
+
+	// Запускаем генерацию горизонтального видео
+	h.handleVoiceMessage(ctx, b, fakeMsg, fakeVoice, true, &orderData.Author, orderData.FileUniqueID, cachedTranscription)
+}
+
+// VerticalCallbackHandler обрабатывает нажатие на кнопку "Вертикальное видео"
 func (h *Handler) VerticalCallbackHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	log.Printf("VerticalCallbackHandler called")
 
@@ -50,11 +209,15 @@ func (h *Handler) VerticalCallbackHandler(ctx context.Context, b *bot.Bot, updat
 	log.Printf("Found vertical request with key: %s", vertKey)
 	orderData := value.(OrderData)
 
-	// Получаем chat_id из callback query
+	// Получаем chat_id и user_id
 	chatID := update.CallbackQuery.From.ID
+	userID := update.CallbackQuery.From.ID
 	if update.CallbackQuery.Message.Message != nil {
 		chatID = update.CallbackQuery.Message.Message.Chat.ID
 	}
+
+	// Проверяем, является ли пользователь админом
+	isAdmin := userID == h.Config.AdminID
 
 	// Проверяем кэш вертикального видео — если есть, отправляем бесплатно
 	if h.DB != nil && orderData.FileUniqueID != "" {
@@ -69,6 +232,14 @@ func (h *Handler) VerticalCallbackHandler(ctx context.Context, b *bot.Bot, updat
 				CallbackQueryID: update.CallbackQuery.ID,
 				Text:            "✅ Видео найдено в кэше!",
 			})
+
+			// Удаляем сообщение с кнопками
+			if update.CallbackQuery.Message.Message != nil {
+				b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+					ChatID:    chatID,
+					MessageID: update.CallbackQuery.Message.Message.ID,
+				})
+			}
 
 			// Отправляем видео из кэша
 			_, err := b.SendVideo(ctx, &bot.SendVideoParams{
@@ -86,32 +257,104 @@ func (h *Handler) VerticalCallbackHandler(ctx context.Context, b *bot.Bot, updat
 		}
 	}
 
-	// Отвечаем на callback чтобы убрать часики
-	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
-		CallbackQueryID: update.CallbackQuery.ID,
-	})
-
-	// Создаем счет на оплату
-	payloadID := fmt.Sprintf("vert_%d_%d", update.CallbackQuery.From.ID, time.Now().UnixNano())
-
-	PendingInvoices.Store(payloadID, orderData)
-
-	// Логируем запрос оплаты
-	if h.DB != nil {
-		h.DB.LogPaymentRequest()
+	// Скачиваем аудио чтобы получить длительность для расчёта стоимости
+	audioPath, err := audio.DownloadAudio(ctx, b, orderData.FileID, h.Config.BotToken)
+	if err != nil {
+		log.Printf("Failed to get audio for duration check: %v", err)
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "❌ Ошибка загрузки аудио.",
+			ShowAlert:       true,
+		})
+		return
 	}
 
-	log.Printf("Sending invoice to chat %d", chatID)
-	b.SendInvoice(ctx, &bot.SendInvoiceParams{
-		ChatID:      chatID,
-		Title:       "Вертикальное видео (9:16)",
-		Description: "Видео будет адаптировано под формат TikTok/Reels/Shorts.",
-		Payload:     payloadID,
-		Currency:    "XTR",
-		Prices: []models.LabeledPrice{
-			{Label: "Вертикальное видео", Amount: h.Config.VerticalCost},
-		},
+	// Получаем длительность
+	duration := video.GetAudioDuration(audioPath)
+	if duration <= 0 {
+		log.Printf("Failed to get audio duration")
+		os.Remove(audioPath)
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "❌ Ошибка получения длительности аудио.",
+			ShowAlert:       true,
+		})
+		return
+	}
+
+	// Рассчитываем стоимость в кредитах
+	durationSec := int(duration)
+	paidSeconds := durationSec - h.Config.FreeSeconds
+	if paidSeconds < 0 {
+		paidSeconds = 0
+	}
+	paidMinutes := (paidSeconds + 59) / 60
+	creditsCost := paidMinutes * h.Config.CreditsPerMinute
+
+	// Если не бесплатно и не админ, проверяем/списываем кредиты
+	if creditsCost > 0 && !isAdmin {
+		if h.DB == nil {
+			b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+				CallbackQueryID: update.CallbackQuery.ID,
+				Text:            "❌ Ошибка: база данных недоступна.",
+				ShowAlert:       true,
+			})
+			os.Remove(audioPath)
+			return
+		}
+
+		// Проверяем баланс
+		balance, err := h.DB.GetUserCredits(userID)
+		if err != nil || balance < int64(creditsCost) {
+			b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+				CallbackQueryID: update.CallbackQuery.ID,
+			})
+			h.sendInsufficientCreditsMessage(ctx, b, chatID, creditsCost, balance)
+			os.Remove(audioPath)
+			return
+		}
+
+		// Списываем кредиты
+		err = h.DB.SpendCredits(userID, int64(creditsCost), fmt.Sprintf("Вертикальное видео (%d сек)", durationSec))
+		if err != nil {
+			log.Printf("Failed to spend credits: %v", err)
+			b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+				CallbackQueryID: update.CallbackQuery.ID,
+				Text:            "❌ Ошибка списания кредитов.",
+				ShowAlert:       true,
+			})
+			os.Remove(audioPath)
+			return
+		}
+		log.Printf("Списано %d кредитов с пользователя %d за вертикальное видео", creditsCost, userID)
+	}
+
+	// Удаляем временный аудио файл — он скачается заново в handleVerticalVideoRequest
+	os.Remove(audioPath)
+
+	// Отвечаем на callback
+	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: update.CallbackQuery.ID,
+		Text:            "🎬 Начинаю генерацию вертикального видео...",
 	})
+
+	// Удаляем сообщение с кнопками
+	if update.CallbackQuery.Message.Message != nil {
+		b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+			ChatID:    chatID,
+			MessageID: update.CallbackQuery.Message.Message.ID,
+		})
+	}
+
+	// Создаём фейковое сообщение для передачи в handleVerticalVideoRequest
+	fromUser := update.CallbackQuery.From
+	fakeMsg := &models.Message{
+		Chat: models.Chat{ID: chatID},
+		From: &fromUser,
+	}
+
+	// Запускаем генерацию вертикального видео
+	h.handleVerticalVideoRequest(ctx, b, fakeMsg, orderData.FileID, orderData.FileUniqueID, &orderData.Author)
 }
 
 // VerticalCacheCallbackHandler обрабатывает нажатие на кнопку "Получить вертикальное видео" (из кэша, бесплатно)

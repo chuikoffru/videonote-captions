@@ -69,7 +69,7 @@ func escapeSubtitlePath(path string) string {
 // calculateOptimalBitrate рассчитывает оптимальный битрейт для соблюдения лимита Telegram (50 MB)
 // Возвращает битрейт в формате "XXXXk"
 func calculateOptimalBitrate(audioPath string, requestedBitrate string, audioBitrate int) string {
-	duration := getAudioDuration(audioPath)
+	duration := GetAudioDuration(audioPath)
 	if duration <= 0 {
 		return requestedBitrate
 	}
@@ -175,7 +175,7 @@ func runFFmpegWithProgress(args []string, audioPath string, onProgress ProgressC
 	buf := make([]byte, 256)
 	var accumulated string
 
-	audioDuration := getAudioDuration(audioPath)
+	audioDuration := GetAudioDuration(audioPath)
 	if audioDuration <= 0 {
 		audioDuration = 60 // fallback
 	}
@@ -224,8 +224,8 @@ func runFFmpegWithProgress(args []string, audioPath string, onProgress ProgressC
 	return outputPath, nil
 }
 
-// getAudioDuration получает длительность аудио в секундах через ffprobe
-func getAudioDuration(audioPath string) float64 {
+// GetAudioDuration получает длительность аудио в секундах через ffprobe
+func GetAudioDuration(audioPath string) float64 {
 	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audioPath)
 	output, err := cmd.Output()
 	if err != nil {

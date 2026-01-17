@@ -59,6 +59,46 @@ func (h *Handler) BalanceHandler(ctx context.Context, b *bot.Bot, update *models
 	})
 }
 
+// sendInsufficientCreditsMessage отправляет сообщение о недостатке кредитов с кнопками покупки
+func (h *Handler) sendInsufficientCreditsMessage(ctx context.Context, b *bot.Bot, chatID int64, needed int, balance int64) {
+	text := fmt.Sprintf("❌ <b>Недостаточно кредитов</b>\n\n"+
+		"💰 Нужно: %d %s\n"+
+		"💳 У вас: %d %s\n\n"+
+		"🛒 <b>Выберите пакет для пополнения:</b>",
+		needed, formatCreditsWord(int64(needed)),
+		balance, formatCreditsWord(balance))
+
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{
+					Text:         fmt.Sprintf("🪙 %d кредитов — %d ₽", h.Config.CreditPackage1Amount, h.Config.CreditPackage1Price),
+					CallbackData: "buy:1",
+				},
+			},
+			{
+				{
+					Text:         fmt.Sprintf("🪙 %d кредитов — %d ₽ (выгода!)", h.Config.CreditPackage2Amount, h.Config.CreditPackage2Price),
+					CallbackData: "buy:2",
+				},
+			},
+			{
+				{
+					Text:         fmt.Sprintf("🪙 %d кредитов — %d ₽ (лучшая цена!)", h.Config.CreditPackage3Amount, h.Config.CreditPackage3Price),
+					CallbackData: "buy:3",
+				},
+			},
+		},
+	}
+
+	b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:      chatID,
+		Text:        text,
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: keyboard,
+	})
+}
+
 // BuyHandler обрабатывает команду /buy - показывает пакеты кредитов
 func (h *Handler) BuyHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil || update.Message.From == nil {

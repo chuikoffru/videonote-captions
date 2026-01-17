@@ -17,10 +17,9 @@ type Config struct {
 	VideoBitrate string
 
 	// Монетизация
-	StarsPerMinute int   // Стоимость каждых 60 секунд сверх бесплатного лимита
-	FreeSeconds    int   // Бесплатный лимит в секундах
-	VerticalCost   int   // Стоимость вертикального видео
-	AdminID        int64 // Telegram ID администратора (без лимитов)
+	CreditsPerMinute int   // Стоимость каждых 60 секунд сверх бесплатного лимита (кредиты)
+	FreeSeconds      int   // Бесплатный лимит в секундах
+	AdminID          int64 // Telegram ID администратора (без лимитов)
 
 	// Кредиты (цены в рублях)
 	CreditPackage1Amount int // Количество кредитов в пакете 1
@@ -41,9 +40,8 @@ func Load() *Config {
 		VideoHeight:          720,
 		VideoFPS:             30,
 		VideoBitrate:         "2000k",
-		StarsPerMinute:       10,   // По умолчанию 10 звёзд за 60 секунд
+		CreditsPerMinute:     10,   // По умолчанию 10 кредитов за 60 секунд
 		FreeSeconds:          60,   // По умолчанию 60 секунд бесплатно
-		VerticalCost:         5,    // По умолчанию 5 звёзд за вертикальное видео
 		CreditPackage1Amount: 100,  // 100 кредитов
 		CreditPackage1Price:  99,   // 99 рублей
 		CreditPackage2Amount: 300,  // 300 кредитов
@@ -64,14 +62,11 @@ func Load() *Config {
 	if br := os.Getenv("VIDEO_BITRATE"); br != "" {
 		cfg.VideoBitrate = br
 	}
-	if spm, err := strconv.Atoi(os.Getenv("STARS_PER_MINUTE")); err == nil && spm > 0 {
-		cfg.StarsPerMinute = spm
-	}
 	if fs, err := strconv.Atoi(os.Getenv("FREE_SECONDS")); err == nil && fs > 0 {
 		cfg.FreeSeconds = fs
 	}
-	if vc, err := strconv.Atoi(os.Getenv("VERTICAL_COST")); err == nil && vc > 0 {
-		cfg.VerticalCost = vc
+	if cpm, err := strconv.Atoi(os.Getenv("CREDITS_PER_MINUTE")); err == nil && cpm > 0 {
+		cfg.CreditsPerMinute = cpm
 	}
 	if adminID, err := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64); err == nil && adminID > 0 {
 		cfg.AdminID = adminID

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"telegram-voice-video-bot/internal/audio"
 	"telegram-voice-video-bot/internal/avatar"
@@ -16,17 +15,126 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
-// VoiceHandler обрабатывает голосовые сообщения
+// VoiceHandler обрабатывает голосовые сообщения — показывает выбор типа видео
 func (h *Handler) VoiceHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil || update.Message.Voice == nil {
 		return
 	}
 
-	h.handleVoiceMessage(ctx, b, update.Message, update.Message.Voice, false, nil, update.Message.Voice.FileUniqueID)
+	msg := update.Message
+	voice := msg.Voice
+
+	// Регистрируем пользователя если ещё не зарегистрирован
+	if h.DB != nil && msg.From != nil {
+		h.DB.GetOrCreateUser(
+			msg.From.ID,
+			msg.From.Username,
+			msg.From.FirstName,
+			msg.From.LastName,
+		)
+	}
+
+	// Определяем автора голосового сообщения
+	author := h.resolveVoiceAuthor(msg)
+
+	// Проверяем, является ли пользователь админом (админ без ограничений)
+	isAdmin := msg.From != nil && msg.From.ID == h.Config.AdminID
+
+	// Сохраняем данные для последующей обработки callback
+	verticalRequestCounter++
+	videoKey := fmt.Sprintf("v%d", verticalRequestCounter)
+	VerticalRequests.Store(videoKey, OrderData{
+		Type:         "voice",
+		FileID:       voice.FileID,
+		FileUniqueID: voice.FileUniqueID,
+		Author:       *author,
+	})
+
+	// Рассчитываем стоимость
+	duration := voice.Duration
+	freeSeconds := h.Config.FreeSeconds
+	paidSeconds := duration - freeSeconds
+	if paidSeconds < 0 {
+		paidSeconds = 0
+	}
+	paidMinutes := (paidSeconds + 59) / 60 // Округление вверх
+	creditsCost := paidMinutes * h.Config.CreditsPerMinute
+
+	// Формируем текст сообщения
+	var messageText string
+	var horizButtonText, vertButtonText string
+
+	durationMin := duration / 60
+	durationSec := duration % 60
+
+	if isAdmin {
+		messageText = fmt.Sprintf(
+			"🎤 <b>Голосовое сообщение</b>\n\n"+
+				"⏱ Длительность: %d:%02d\n"+
+				"👑 Вы администратор — генерация бесплатна\n\n"+
+				"Выберите формат видео:",
+			durationMin, durationSec,
+		)
+		horizButtonText = "📺 Горизонтальное видео"
+		vertButtonText = "📱 Вертикальное видео"
+	} else if paidMinutes == 0 {
+		messageText = fmt.Sprintf(
+			"🎤 <b>Голосовое сообщение</b>\n\n"+
+				"⏱ Длительность: %d:%02d\n"+
+				"✅ Первые %d секунд бесплатно\n\n"+
+				"Выберите формат видео:",
+			durationMin, durationSec, freeSeconds,
+		)
+		horizButtonText = "📺 Горизонтальное видео"
+		vertButtonText = "📱 Вертикальное видео"
+	} else {
+		messageText = fmt.Sprintf(
+			"🎤 <b>Голосовое сообщение</b>\n\n"+
+				"⏱ Длительность: %d:%02d\n"+
+				"✅ Первые %d секунд — бесплатно\n"+
+				"💰 Дополнительные %d мин. — %d %s\n\n"+
+				"Выберите формат видео:",
+			durationMin, durationSec,
+			freeSeconds,
+			paidMinutes, creditsCost, formatCreditsWord(int64(creditsCost)),
+		)
+		horizButtonText = fmt.Sprintf("📺 Горизонтальное (%d кред.)", creditsCost)
+		vertButtonText = fmt.Sprintf("📱 Вертикальное (%d кред.)", creditsCost)
+	}
+
+	// Отправляем сообщение с кнопками
+	_, err := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    msg.Chat.ID,
+		Text:      messageText,
+		ParseMode: models.ParseModeHTML,
+		ReplyParameters: &models.ReplyParameters{
+			MessageID: msg.ID,
+		},
+		ReplyMarkup: &models.InlineKeyboardMarkup{
+			InlineKeyboard: [][]models.InlineKeyboardButton{
+				{
+					{
+						Text:         horizButtonText,
+						CallbackData: "horiz:" + videoKey,
+					},
+				},
+				{
+					{
+						Text:         vertButtonText,
+						CallbackData: "vert:" + videoKey,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		log.Printf("Failed to send video type selection: %v", err)
+	}
 }
 
 // handleVoiceMessage обрабатывает голосовое сообщение
-func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *models.Message, voice *models.Voice, isPaid bool, authorOverride *Author, voiceFileUniqueID string) {
+// cachedTranscription может быть передан вызывающим кодом, чтобы избежать повторной транскрипции
+func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *models.Message, voice *models.Voice, isPaid bool, authorOverride *Author, voiceFileUniqueID string, cachedTranscription *transcription.Result) {
 	// Определяем автора голосового сообщения
 	author := authorOverride
 	if author == nil {
@@ -43,9 +151,8 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 		)
 	}
 
-	// Проверяем кэш перед обработкой
-	var cachedTranscription *transcription.Result
-	if h.DB != nil && voiceFileUniqueID != "" {
+	// Проверяем кэш перед обработкой (только если транскрипция не была передана)
+	if cachedTranscription == nil && h.DB != nil && voiceFileUniqueID != "" {
 		cache, err := h.DB.GetCachedVideo(voiceFileUniqueID)
 		if err != nil {
 			log.Printf("Ошибка проверки кэша: %v", err)
@@ -59,7 +166,7 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 			// Проверяем, изменился ли фон
 			backgroundChanged := cache.HorizontalBackground != currentHorizBg
 
-			// Если есть кэшированная транскрипция, сохраняем для использования
+			// Если есть кэшированная транскрипция, загружаем для использования
 			if cache.TranscriptionJSON != "" {
 				cachedTranscription, _ = transcription.ResultFromJSON(cache.TranscriptionJSON)
 			}
@@ -68,40 +175,10 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 			if cache.VideoFileID != "" && !backgroundChanged {
 				log.Printf("✅ Найден кэш для voice_file_unique_id=%s, отправляем видео из кэша", voiceFileUniqueID)
 
-				// Создаем короткий ключ для callback_data
-				verticalRequestCounter++
-				vertKey := fmt.Sprintf("v%d", verticalRequestCounter)
-				VerticalRequests.Store(vertKey, OrderData{
-					Type:         "vertical",
-					FileID:       voice.FileID,
-					FileUniqueID: voiceFileUniqueID,
-					Author:       *author,
-				})
-
-				// Определяем, есть ли вертикальное видео в кэше
-				var buttonText, buttonCallback string
-				if cache.VerticalVideoFileID != "" {
-					buttonText = "📱 Получить вертикальное видео (бесплатно)"
-					buttonCallback = "vertcache:" + vertKey
-				} else {
-					buttonText = fmt.Sprintf("📱 Сделать вертикальное видео (%d⭐)", h.Config.VerticalCost)
-					buttonCallback = "vert:" + vertKey
-				}
-
-				// Отправляем видео из кэша по file_id
+				// Отправляем видео из кэша по file_id (без кнопки)
 				_, err := b.SendVideo(ctx, &bot.SendVideoParams{
 					ChatID: msg.Chat.ID,
 					Video:  &models.InputFileString{Data: cache.VideoFileID},
-					ReplyMarkup: &models.InlineKeyboardMarkup{
-						InlineKeyboard: [][]models.InlineKeyboardButton{
-							{
-								{
-									Text:         buttonText,
-									CallbackData: buttonCallback,
-								},
-							},
-						},
-					},
 				})
 				if err != nil {
 					log.Printf("Ошибка отправки видео из кэша: %v", err)
@@ -116,43 +193,7 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 	}
 
 	// Проверяем, является ли пользователь админом (админ без ограничений)
-	isAdmin := msg.From != nil && msg.From.ID == h.Config.AdminID
-
-	// Проверяем длительность и оплату (админ пропускает оплату)
-	if !isPaid && !isAdmin && voice.Duration > h.Config.FreeSeconds {
-		duration := voice.Duration
-		// Расчёт: количество 60-секундных блоков сверх бесплатного лимита
-		paidMinutes := (duration - h.Config.FreeSeconds + 59) / 60 // Округление вверх
-		price := paidMinutes * h.Config.StarsPerMinute
-
-		payloadID := fmt.Sprintf("%d_%d", msg.From.ID, time.Now().UnixNano())
-
-		log.Printf("Creating invoice with payloadID: %s, fileID: %s", payloadID, voice.FileID)
-
-		PendingInvoices.Store(payloadID, OrderData{
-			Type:         "voice",
-			FileID:       voice.FileID,
-			FileUniqueID: voiceFileUniqueID,
-			Author:       *author,
-		})
-
-		// Логируем запрос оплаты
-		if h.DB != nil {
-			h.DB.LogPaymentRequest()
-		}
-
-		b.SendInvoice(ctx, &bot.SendInvoiceParams{
-			ChatID:      msg.Chat.ID,
-			Title:       "Длинное голосовое сообщение",
-			Description: fmt.Sprintf("Первые %d секунд — бесплатно! Каждые следующие 60 секунд — %d звёзд. Стоимость твоего видео %d Telegram Stars", h.Config.FreeSeconds, h.Config.StarsPerMinute, price),
-			Payload:     payloadID,
-			Currency:    "XTR",
-			Prices: []models.LabeledPrice{
-				{Label: "Видео", Amount: int(price)},
-			},
-		})
-		return
-	}
+	_ = msg.From != nil && msg.From.ID == h.Config.AdminID // isAdmin - не используется, так как оплата через кредиты проверяется в callback
 
 	// Отправляем статусное сообщение
 	statusMsg, err := b.SendMessage(ctx, &bot.SendMessageParams{
@@ -250,29 +291,9 @@ func (h *Handler) handleVoiceMessage(ctx context.Context, b *bot.Bot, msg *model
 	}
 	defer videoFile.Close()
 
-	// Создаем короткий ключ для callback_data (ограничение Telegram - 64 байта)
-	verticalRequestCounter++
-	vertKey := fmt.Sprintf("v%d", verticalRequestCounter)
-	VerticalRequests.Store(vertKey, OrderData{
-		Type:         "vertical",
-		FileID:       voice.FileID,
-		FileUniqueID: voiceFileUniqueID,
-		Author:       *author,
-	})
-
 	videoResult, err := b.SendVideo(ctx, &bot.SendVideoParams{
 		ChatID: msg.Chat.ID,
 		Video:  &models.InputFileUpload{Filename: "video.mp4", Data: videoFile},
-		ReplyMarkup: &models.InlineKeyboardMarkup{
-			InlineKeyboard: [][]models.InlineKeyboardButton{
-				{
-					{
-						Text:         fmt.Sprintf("📱 Сделать вертикальное видео (%d⭐)", h.Config.VerticalCost),
-						CallbackData: "vert:" + vertKey,
-					},
-				},
-			},
-		},
 	})
 	if err != nil {
 		log.Printf("Failed to send video: %v", err)
