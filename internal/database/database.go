@@ -462,3 +462,97 @@ func (d *DB) GetCreditTransactions(telegramID int64, limit int) ([]CreditTransac
 	err := d.Where("user_id = ?", telegramID).Order("created_at DESC").Limit(limit).Find(&transactions).Error
 	return transactions, err
 }
+
+// FullStats расширенная статистика для админа
+type FullStats struct {
+	// По пользователям
+	TotalUsers      int64
+	UsersNoVideos   int64
+	UsersOneVideo   int64
+	UsersMoreVideos int64
+
+	// По типам видео
+	VerticalVideos   int
+	HorizontalVideos int
+
+	// По генерациям
+	FreeVideos      int
+	PaymentRequests int
+	PaidVideos      int
+
+	// По деньгам
+	TotalBalances int64
+	TotalSpent    int64
+}
+
+// GetFullStats возвращает полную статистику для админа
+func (d *DB) GetFullStats() (*FullStats, error) {
+	result := &FullStats{}
+
+	// 1. Получаем статистику по пользователям
+	if err := d.Model(&User{}).Count(&result.TotalUsers).Error; err != nil {
+		return nil, err
+	}
+
+	// 2. Получаем количество видео на каждого пользователя
+	type UserVideoCount struct {
+		UserID int64
+		Count  int64
+	}
+	var videoCountResults []UserVideoCount
+	if err := d.Model(&VideoLog{}).Select("user_id, count(*) as count").Group("user_id").Scan(&videoCountResults).Error; err != nil {
+		return nil, err
+	}
+
+	var usersWithVideos int64 = 0
+	for _, res := range videoCountResults {
+		usersWithVideos++
+		if res.Count == 1 {
+			result.UsersOneVideo++
+		} else if res.Count > 1 {
+			result.UsersMoreVideos++
+		}
+	}
+	result.UsersNoVideos = result.TotalUsers - usersWithVideos
+	if result.UsersNoVideos < 0 {
+		result.UsersNoVideos = 0
+	}
+
+	// 3. Статистика из таблицы Stats
+	var stats Stats
+	if err := d.First(&stats).Error; err == nil {
+		result.VerticalVideos = stats.TotalVerticalVideos
+		result.FreeVideos = stats.TotalFreeVideos
+		result.PaymentRequests = stats.TotalPaymentRequests
+		result.PaidVideos = stats.TotalPaidVideos
+	}
+
+	// 4. Горизонтальные = все видео - вертикальные (из VideoLog можно посчитать)
+	var totalVideos int64
+	if err := d.Model(&VideoLog{}).Count(&totalVideos).Error; err != nil {
+		return nil, err
+	}
+	result.HorizontalVideos = int(totalVideos) - result.VerticalVideos
+	if result.HorizontalVideos < 0 {
+		result.HorizontalVideos = 0
+	}
+
+	// 5. Сумма балансов пользователей
+	type SumResult struct {
+		Total int64
+	}
+	var balanceSum SumResult
+	if err := d.Model(&User{}).Select("COALESCE(SUM(credits), 0) as total").Scan(&balanceSum).Error; err != nil {
+		return nil, err
+	}
+	result.TotalBalances = balanceSum.Total
+
+	// 6. Сумма использованных средств (spend транзакции)
+	var spentSum SumResult
+	if err := d.Model(&CreditTransaction{}).Where("type = ?", "spend").Select("COALESCE(SUM(ABS(amount)), 0) as total").Scan(&spentSum).Error; err != nil {
+		return nil, err
+	}
+	result.TotalSpent = spentSum.Total
+
+	return result, nil
+}

@@ -70,57 +70,6 @@ func (h *Handler) HelpHandler(ctx context.Context, b *bot.Bot, update *models.Up
 	}
 }
 
-// StatsHandler обрабатывает команду /stats (только для админа)
-func (h *Handler) StatsHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.Message == nil || update.Message.From == nil {
-		return
-	}
-
-	// Проверяем, что это админ
-	if update.Message.From.ID != h.Config.AdminID {
-		log.Printf("Stats requested by non-admin user: %d", update.Message.From.ID)
-		return
-	}
-
-	if h.DB == nil {
-		b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: update.Message.Chat.ID,
-			Text:   "❌ База данных не инициализирована.",
-		})
-		return
-	}
-
-	stats, userCount, err := h.DB.GetStats()
-	if err != nil {
-		log.Printf("Failed to get stats: %v", err)
-		b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: update.Message.Chat.ID,
-			Text:   "❌ Ошибка получения статистики.",
-		})
-		return
-	}
-
-	statsText := fmt.Sprintf(`📊 *Статистика бота*
-
-👥 Пользователей: %d
-🎬 Бесплатных видео: %d
-💳 Запросов оплаты: %d
-✅ Оплаченных видео: %d
-📱 Вертикальных видео: %d`,
-		userCount,
-		stats.TotalFreeVideos,
-		stats.TotalPaymentRequests,
-		stats.TotalPaidVideos,
-		stats.TotalVerticalVideos,
-	)
-
-	b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:    update.Message.Chat.ID,
-		Text:      statsText,
-		ParseMode: models.ParseModeMarkdown,
-	})
-}
-
 // BroadcastHandler обрабатывает команду /broadcast (только для админа)
 func (h *Handler) BroadcastHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil || update.Message.From == nil {
@@ -207,6 +156,7 @@ func (h *Handler) BroadcastHandler(ctx context.Context, b *bot.Bot, update *mode
 }
 
 // UsageHandler обрабатывает команду /usage (только для админа)
+// Объединяет функционал бывшей команды /stats
 func (h *Handler) UsageHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil || update.Message.From == nil {
 		return
@@ -225,24 +175,47 @@ func (h *Handler) UsageHandler(ctx context.Context, b *bot.Bot, update *models.U
 		return
 	}
 
-	users0, users1, usersMore, err := h.DB.GetUsageStats()
+	stats, err := h.DB.GetFullStats()
 	if err != nil {
-		log.Printf("Failed to get usage stats: %v", err)
+		log.Printf("Failed to get full stats: %v", err)
 		b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: update.Message.Chat.ID,
-			Text:   "❌ Ошибка получения статистики использования.",
+			Text:   "❌ Ошибка получения статистики.",
 		})
 		return
 	}
 
-	usageText := fmt.Sprintf(`📊 *Статистика использования*
+	usageText := fmt.Sprintf(`📊 *Статистика бота*
 
+*По пользователям:*
+👥 Пользователей: %d
 0️⃣ Ни одного видео: %d пользователей
 1️⃣ Только 1 видео: %d пользователей
-🚀 Больше 1 видео: %d пользователей`,
-		users0,
-		users1,
-		usersMore,
+🚀 Больше 1 видео: %d пользователей
+
+*По типам видео:*
+📐 Вертикальных видео: %d
+📏 Горизонтальных видео: %d
+
+*По генерациям видео:*
+🎬 Бесплатных видео: %d
+💳 Запросов оплаты: %d
+✅ Оплаченных видео: %d
+
+*По деньгам:*
+💰 Сумма всех балансов: %d кредитов
+💸 Использовано средств: %d кредитов`,
+		stats.TotalUsers,
+		stats.UsersNoVideos,
+		stats.UsersOneVideo,
+		stats.UsersMoreVideos,
+		stats.VerticalVideos,
+		stats.HorizontalVideos,
+		stats.FreeVideos,
+		stats.PaymentRequests,
+		stats.PaidVideos,
+		stats.TotalBalances,
+		stats.TotalSpent,
 	)
 
 	b.SendMessage(ctx, &bot.SendMessageParams{

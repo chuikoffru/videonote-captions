@@ -64,12 +64,6 @@ func main() {
 				return
 			}
 
-			// Обрабатываем команду /stats (только для админа)
-			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/stats") {
-				h.StatsHandler(ctx, b, update)
-				return
-			}
-
 			// Обрабатываем команду /broadcast (только для админа)
 			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/broadcast") {
 				h.BroadcastHandler(ctx, b, update)
