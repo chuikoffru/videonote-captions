@@ -9,6 +9,7 @@ type Config struct {
 	BotToken     string
 	OpenAIAPIKey string
 	Proxy        string
+	YuKassaToken string // provider_token для ЮКасса
 
 	VideoWidth   int
 	VideoHeight  int
@@ -20,20 +21,35 @@ type Config struct {
 	FreeSeconds    int   // Бесплатный лимит в секундах
 	VerticalCost   int   // Стоимость вертикального видео
 	AdminID        int64 // Telegram ID администратора (без лимитов)
+
+	// Кредиты (цены в рублях)
+	CreditPackage1Amount int // Количество кредитов в пакете 1
+	CreditPackage1Price  int // Цена пакета 1 в рублях
+	CreditPackage2Amount int // Количество кредитов в пакете 2
+	CreditPackage2Price  int // Цена пакета 2 в рублях
+	CreditPackage3Amount int // Количество кредитов в пакете 3
+	CreditPackage3Price  int // Цена пакета 3 в рублях
 }
 
 func Load() *Config {
 	cfg := &Config{
-		BotToken:       os.Getenv("BOT_TOKEN"),
-		OpenAIAPIKey:   os.Getenv("OPENAI_API_KEY"),
-		Proxy:          os.Getenv("PROXY"),
-		VideoWidth:     1280,
-		VideoHeight:    720,
-		VideoFPS:       30,
-		VideoBitrate:   "2000k",
-		StarsPerMinute: 10, // По умолчанию 10 звёзд за 60 секунд
-		FreeSeconds:    60, // По умолчанию 60 секунд бесплатно
-		VerticalCost:   5,  // По умолчанию 5 звёзд за вертикальное видео
+		BotToken:             os.Getenv("BOT_TOKEN"),
+		OpenAIAPIKey:         os.Getenv("OPENAI_API_KEY"),
+		Proxy:                os.Getenv("PROXY"),
+		YuKassaToken:         os.Getenv("YUKASSA_PROVIDER_TOKEN"),
+		VideoWidth:           1280,
+		VideoHeight:          720,
+		VideoFPS:             30,
+		VideoBitrate:         "2000k",
+		StarsPerMinute:       10,   // По умолчанию 10 звёзд за 60 секунд
+		FreeSeconds:          60,   // По умолчанию 60 секунд бесплатно
+		VerticalCost:         5,    // По умолчанию 5 звёзд за вертикальное видео
+		CreditPackage1Amount: 100,  // 100 кредитов
+		CreditPackage1Price:  99,   // 99 рублей
+		CreditPackage2Amount: 300,  // 300 кредитов
+		CreditPackage2Price:  249,  // 249 рублей
+		CreditPackage3Amount: 1000, // 1000 кредитов
+		CreditPackage3Price:  749,  // 749 рублей
 	}
 
 	if w, err := strconv.Atoi(os.Getenv("VIDEO_WIDTH")); err == nil && w > 0 {
@@ -59,6 +75,26 @@ func Load() *Config {
 	}
 	if adminID, err := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64); err == nil && adminID > 0 {
 		cfg.AdminID = adminID
+	}
+
+	// Загрузка настроек пакетов кредитов
+	if cp1a, err := strconv.Atoi(os.Getenv("CREDIT_PACKAGE_1_AMOUNT")); err == nil && cp1a > 0 {
+		cfg.CreditPackage1Amount = cp1a
+	}
+	if cp1p, err := strconv.Atoi(os.Getenv("CREDIT_PACKAGE_1_PRICE")); err == nil && cp1p > 0 {
+		cfg.CreditPackage1Price = cp1p
+	}
+	if cp2a, err := strconv.Atoi(os.Getenv("CREDIT_PACKAGE_2_AMOUNT")); err == nil && cp2a > 0 {
+		cfg.CreditPackage2Amount = cp2a
+	}
+	if cp2p, err := strconv.Atoi(os.Getenv("CREDIT_PACKAGE_2_PRICE")); err == nil && cp2p > 0 {
+		cfg.CreditPackage2Price = cp2p
+	}
+	if cp3a, err := strconv.Atoi(os.Getenv("CREDIT_PACKAGE_3_AMOUNT")); err == nil && cp3a > 0 {
+		cfg.CreditPackage3Amount = cp3a
+	}
+	if cp3p, err := strconv.Atoi(os.Getenv("CREDIT_PACKAGE_3_PRICE")); err == nil && cp3p > 0 {
+		cfg.CreditPackage3Price = cp3p
 	}
 
 	return cfg

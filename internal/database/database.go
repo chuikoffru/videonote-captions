@@ -16,10 +16,23 @@ type User struct {
 	Username             string
 	FirstName            string
 	LastName             string
+	Credits              int64  `gorm:"default:0"` // Баланс кредитов
 	HorizontalBackground string // Путь к кастомному горизонтальному фону
 	VerticalBackground   string // Путь к кастомному вертикальному фону
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+}
+
+// CreditTransaction хранит историю операций с кредитами
+type CreditTransaction struct {
+	ID           uint   `gorm:"primaryKey"`
+	UserID       int64  `gorm:"index"` // Telegram ID пользователя
+	Amount       int64  // Количество кредитов (положительное - пополнение, отрицательное - списание)
+	Type         string // "purchase", "spend", "refund", "bonus"
+	Description  string // Описание операции
+	PaymentID    string // ID платежа (для пополнений)
+	BalanceAfter int64  // Баланс после операции
+	CreatedAt    time.Time
 }
 
 // VideoLog хранит лог созданных видео
@@ -69,7 +82,7 @@ func New(dbPath string) (*DB, error) {
 	}
 
 	// Автомиграция
-	if err := db.AutoMigrate(&User{}, &VideoLog{}, &Stats{}, &VoiceCache{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &VideoLog{}, &Stats{}, &VoiceCache{}, &CreditTransaction{}); err != nil {
 		return nil, err
 	}
 
@@ -372,4 +385,80 @@ func (d *DB) InvalidateVideoCache(voiceFileUniqueID string, invalidateHorizontal
 		return d.Model(&cache).Updates(updates).Error
 	}
 	return nil
+}
+
+// GetUserCredits возвращает баланс кредитов пользователя
+func (d *DB) GetUserCredits(telegramID int64) (int64, error) {
+	var user User
+	err := d.Where("telegram_id = ?", telegramID).First(&user).Error
+	if err != nil {
+		return 0, err
+	}
+	return user.Credits, nil
+}
+
+// AddCredits добавляет кредиты на баланс пользователя
+func (d *DB) AddCredits(telegramID int64, amount int64, txType, description, paymentID string) error {
+	return d.Transaction(func(tx *gorm.DB) error {
+		var user User
+		if err := tx.Where("telegram_id = ?", telegramID).First(&user).Error; err != nil {
+			return err
+		}
+
+		newBalance := user.Credits + amount
+
+		// Обновляем баланс
+		if err := tx.Model(&user).Update("credits", newBalance).Error; err != nil {
+			return err
+		}
+
+		// Создаём запись транзакции
+		transaction := CreditTransaction{
+			UserID:       telegramID,
+			Amount:       amount,
+			Type:         txType,
+			Description:  description,
+			PaymentID:    paymentID,
+			BalanceAfter: newBalance,
+		}
+		return tx.Create(&transaction).Error
+	})
+}
+
+// SpendCredits списывает кредиты с баланса (возвращает ошибку если недостаточно)
+func (d *DB) SpendCredits(telegramID int64, amount int64, description string) error {
+	return d.Transaction(func(tx *gorm.DB) error {
+		var user User
+		if err := tx.Where("telegram_id = ?", telegramID).First(&user).Error; err != nil {
+			return err
+		}
+
+		if user.Credits < amount {
+			return gorm.ErrRecordNotFound // Используем как индикатор недостаточного баланса
+		}
+
+		newBalance := user.Credits - amount
+
+		// Обновляем баланс
+		if err := tx.Model(&user).Update("credits", newBalance).Error; err != nil {
+			return err
+		}
+
+		// Создаём запись транзакции
+		transaction := CreditTransaction{
+			UserID:       telegramID,
+			Amount:       -amount, // Отрицательное значение для списания
+			Type:         "spend",
+			Description:  description,
+			BalanceAfter: newBalance,
+		}
+		return tx.Create(&transaction).Error
+	})
+}
+
+// GetCreditTransactions возвращает историю транзакций пользователя
+func (d *DB) GetCreditTransactions(telegramID int64, limit int) ([]CreditTransaction, error) {
+	var transactions []CreditTransaction
+	err := d.Where("user_id = ?", telegramID).Order("created_at DESC").Limit(limit).Find(&transactions).Error
+	return transactions, err
 }

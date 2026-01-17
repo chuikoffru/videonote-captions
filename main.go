@@ -82,6 +82,18 @@ func main() {
 				return
 			}
 
+			// Обрабатываем команду /balance
+			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/balance") {
+				h.BalanceHandler(ctx, b, update)
+				return
+			}
+
+			// Обрабатываем команду /buy
+			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/buy") {
+				h.BuyHandler(ctx, b, update)
+				return
+			}
+
 			// Обрабатываем фото (кастомные фоны)
 			if update.Message != nil && update.Message.Photo != nil {
 				h.PhotoHandler(ctx, b, update)
@@ -96,18 +108,32 @@ func main() {
 
 			// Обрабатываем успешный платёж
 			if update.Message != nil && update.Message.SuccessfulPayment != nil {
+				// Проверяем валюту: RUB - покупка кредитов, XTR - Telegram Stars
+				if update.Message.SuccessfulPayment.Currency == "RUB" {
+					h.CreditSuccessfulPaymentHandler(ctx, b, update)
+					return
+				}
 				h.SuccessfulPaymentHandler(ctx, b, update)
 				return
 			}
 
 			// Обрабатываем pre_checkout_query
 			if update.PreCheckoutQuery != nil {
+				// Проверяем, это покупка кредитов или Telegram Stars
+				if strings.HasPrefix(update.PreCheckoutQuery.InvoicePayload, "credit:") {
+					h.CreditPreCheckoutHandler(ctx, b, update)
+					return
+				}
 				h.PreCheckoutHandler(ctx, b, update)
 				return
 			}
 
 			// Обрабатываем нажатия на кнопки (CallbackQuery)
 			if update.CallbackQuery != nil {
+				if strings.HasPrefix(update.CallbackQuery.Data, "buy:") {
+					h.BuyCallbackHandler(ctx, b, update)
+					return
+				}
 				if strings.HasPrefix(update.CallbackQuery.Data, "vertcache:") {
 					h.VerticalCacheCallbackHandler(ctx, b, update)
 				} else {
