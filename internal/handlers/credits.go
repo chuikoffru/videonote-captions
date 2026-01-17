@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -178,8 +179,41 @@ func (h *Handler) BuyCallbackHandler(ctx context.Context, b *bot.Bot, update *mo
 
 	log.Printf("Создаём invoice для покупки кредитов: user=%d, amount=%d, price=%d RUB", userID, amount, price)
 
-	// Отправляем invoice
-	_, err := b.SendInvoice(ctx, &bot.SendInvoiceParams{
+	// Формируем provider_data для чека ЮKassa
+	// Сумма в provider_data указывается в рублях (не в копейках!)
+	providerData := map[string]interface{}{
+		"receipt": map[string]interface{}{
+			"items": []map[string]interface{}{
+				{
+					"description": description,
+					"quantity":    1,
+					"amount": map[string]interface{}{
+						"value":    float64(price), // В рублях
+						"currency": "RUB",
+					},
+					"vat_code":        1, // НДС не облагается
+					"payment_mode":    "full_payment",
+					"payment_subject": "service", // Услуга
+				},
+			},
+			"tax_system_code": 2, // УСН (доходы)
+		},
+	}
+
+	providerDataJSON, err := json.Marshal(providerData)
+	if err != nil {
+		log.Printf("Ошибка сериализации provider_data: %v", err)
+		b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "❌ Ошибка при создании платежа. Попробуйте позже.",
+		})
+		return
+	}
+
+	log.Printf("provider_data: %s", string(providerDataJSON))
+
+	// Отправляем invoice с параметрами для фискализации
+	_, err = b.SendInvoice(ctx, &bot.SendInvoiceParams{
 		ChatID:        chatID,
 		Title:         "Пополнение баланса",
 		Description:   description,
@@ -189,6 +223,9 @@ func (h *Handler) BuyCallbackHandler(ctx context.Context, b *bot.Bot, update *mo
 		Prices: []models.LabeledPrice{
 			{Label: description, Amount: price * 100}, // Цена в копейках
 		},
+		NeedEmail:           true, // Запрашиваем email у пользователя
+		SendEmailToProvider: true, // Отправляем email провайдеру для чека
+		ProviderData:        string(providerDataJSON),
 	})
 
 	if err != nil {
