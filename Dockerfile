@@ -3,7 +3,7 @@ FROM golang:1.25.6-alpine AS builder
 WORKDIR /app
 
 # Устанавливаем зависимости для CGO (SQLite)
-RUN apt-get update && apt-get install -y gcc libc6-dev
+RUN apk add --no-cache gcc musl-dev
 
 # Копируем go.mod и go.sum для кэширования зависимостей
 COPY go.mod go.sum ./
@@ -17,17 +17,16 @@ RUN CGO_ENABLED=1 GOOS=linux go build -o bot .
 
 # ---
 
-FROM debian:bullseye-slim
+FROM alpine:latest
 
 # Устанавливаем FFmpeg, шрифты и SQLite
-RUN apt-get update && apt-get install -y \
+RUN apk add --no-cache \
     ffmpeg \
-    fonts-liberation \
-    fonts-noto \
-    fonts-noto-color-emoji \
+    font-noto \
+    font-noto-emoji \
     ca-certificates \
-    sqlite3 \
-    && rm -rf /var/lib/apt/lists/*
+    sqlite \
+    tzdata
 
 WORKDIR /app
 
