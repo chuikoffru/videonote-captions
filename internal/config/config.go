@@ -20,6 +20,7 @@ type Config struct {
 	CreditsPerMinute int   // Стоимость каждых 60 секунд сверх бесплатного лимита (кредиты)
 	FreeSeconds      int   // Бесплатный лимит в секундах
 	AdminID          int64 // Telegram ID администратора (без лимитов)
+	VideoNoteCredits int   // Стоимость обработки Video Note (кружочка)
 
 	// Кредиты (цены в рублях)
 	CreditPackage1Amount int // Количество кредитов в пакете 1
@@ -70,6 +71,11 @@ func Load() *Config {
 	}
 	if adminID, err := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64); err == nil && adminID > 0 {
 		cfg.AdminID = adminID
+	}
+	if vnc, err := strconv.Atoi(os.Getenv("VIDEO_NOTE_CREDITS")); err == nil && vnc > 0 {
+		cfg.VideoNoteCredits = vnc
+	} else {
+		cfg.VideoNoteCredits = 10 // Дефолтное значение
 	}
 
 	// Загрузка настроек пакетов кредитов

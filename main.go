@@ -88,6 +88,12 @@ func main() {
 				return
 			}
 
+			// Обрабатываем Video Note (кружочки)
+			if update.Message != nil && update.Message.VideoNote != nil {
+				h.VideoNoteHandler(ctx, b, update)
+				return
+			}
+
 			// Обрабатываем голосовые сообщения
 			if update.Message != nil && update.Message.Voice != nil {
 				h.VoiceHandler(ctx, b, update)
