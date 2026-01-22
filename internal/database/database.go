@@ -51,6 +51,7 @@ type Stats struct {
 	TotalFreeVideos      int  // Видео до FREE_SECONDS
 	TotalPaidVideos      int  // Оплаченные видео
 	TotalVerticalVideos  int  `gorm:"default:0"` // Вертикальные видео
+	TotalVideoNotes      int  `gorm:"default:0"` // Видео-кружочки
 	TotalPaymentRequests int  // Запрошенные платежи (инвойсы)
 	UpdatedAt            time.Time
 }
@@ -176,6 +177,11 @@ func (d *DB) LogPaymentRequest() error {
 // LogVerticalVideo логирует создание вертикального видео
 func (d *DB) LogVerticalVideo() error {
 	return d.Model(&Stats{}).Where("id = 1").Update("total_vertical_videos", gorm.Expr("total_vertical_videos + 1")).Error
+}
+
+// LogVideoNote логирует создание видео-кружочка
+func (d *DB) LogVideoNote() error {
+	return d.Model(&Stats{}).Where("id = 1").Update("total_video_notes", gorm.Expr("total_video_notes + 1")).Error
 }
 
 // GetAllUsers возвращает список Telegram ID всех пользователей
@@ -474,6 +480,7 @@ type FullStats struct {
 	// По типам видео
 	VerticalVideos   int
 	HorizontalVideos int
+	VideoNotes       int // Видео-кружочки
 
 	// По генерациям
 	FreeVideos      int
@@ -522,6 +529,7 @@ func (d *DB) GetFullStats() (*FullStats, error) {
 	var stats Stats
 	if err := d.First(&stats).Error; err == nil {
 		result.VerticalVideos = stats.TotalVerticalVideos
+		result.VideoNotes = stats.TotalVideoNotes
 		result.FreeVideos = stats.TotalFreeVideos
 		result.PaymentRequests = stats.TotalPaymentRequests
 		result.PaidVideos = stats.TotalPaidVideos

@@ -113,6 +113,13 @@ func (h *Handler) VideoNoteHandler(ctx context.Context, b *bot.Bot, update *mode
 		}
 	}
 
+	// Логируем создание video note
+	if h.DB != nil {
+		if err := h.DB.LogVideoNote(); err != nil {
+			log.Printf("Failed to log video note: %v", err)
+		}
+	}
+
 	// 7. Отправка результата
 	h.updateStatus(ctx, b, chatID, statusMsg.ID, "📤 Отправляю результат...")
 	

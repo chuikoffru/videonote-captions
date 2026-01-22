@@ -195,6 +195,7 @@ func (h *Handler) UsageHandler(ctx context.Context, b *bot.Bot, update *models.U
 *По типам видео:*
 📐 Вертикальных видео: %d
 📏 Горизонтальных видео: %d
+⚪ Кружочков: %d
 
 *По генерациям видео:*
 🎬 Бесплатных видео: %d
@@ -210,6 +211,7 @@ func (h *Handler) UsageHandler(ctx context.Context, b *bot.Bot, update *models.U
 		stats.UsersMoreVideos,
 		stats.VerticalVideos,
 		stats.HorizontalVideos,
+		stats.VideoNotes,
 		stats.FreeVideos,
 		stats.PaymentRequests,
 		stats.PaidVideos,
