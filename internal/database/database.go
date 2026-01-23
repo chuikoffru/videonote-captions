@@ -9,7 +9,6 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// User представляет пользователя бота
 type User struct {
 	ID                   uint  `gorm:"primaryKey"`
 	TelegramID           int64 `gorm:"uniqueIndex"`
@@ -19,6 +18,8 @@ type User struct {
 	Credits              int64  `gorm:"default:0"` // Баланс кредитов
 	HorizontalBackground string // Путь к кастомному горизонтальному фону
 	VerticalBackground   string // Путь к кастомному вертикальному фону
+	FreeVideoNotesUsed   int    `gorm:"default:0"` // Использовано бесплатных кружочков в этом месяце
+	FreeVideoNotesReset  time.Time               // Дата последнего сброса счетчика
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 }
@@ -563,4 +564,38 @@ func (d *DB) GetFullStats() (*FullStats, error) {
 	result.TotalSpent = spentSum.Total
 
 	return result, nil
+}
+
+// GetFreeVideoNotesRemaining возвращает количество оставшихся бесплатных кружочков
+// и автоматически сбрасывает счетчик если наступил новый месяц
+func (d *DB) GetFreeVideoNotesRemaining(telegramID int64, monthlyLimit int) (int, error) {
+	var user User
+	if err := d.Where("telegram_id = ?", telegramID).First(&user).Error; err != nil {
+		return 0, err
+	}
+
+	now := time.Now()
+	// Проверяем, нужен ли сброс (новый месяц)
+	if user.FreeVideoNotesReset.IsZero() ||
+		now.Year() > user.FreeVideoNotesReset.Year() ||
+		(now.Year() == user.FreeVideoNotesReset.Year() && now.Month() > user.FreeVideoNotesReset.Month()) {
+		// Сбрасываем счетчик
+		d.Model(&user).Updates(map[string]interface{}{
+			"free_video_notes_used":  0,
+			"free_video_notes_reset": now,
+		})
+		return monthlyLimit, nil
+	}
+
+	remaining := monthlyLimit - user.FreeVideoNotesUsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	return remaining, nil
+}
+
+// UseFreeVideoNote использует один бесплатный кружочек
+func (d *DB) UseFreeVideoNote(telegramID int64) error {
+	return d.Model(&User{}).Where("telegram_id = ?", telegramID).
+		Update("free_video_notes_used", gorm.Expr("free_video_notes_used + 1")).Error
 }

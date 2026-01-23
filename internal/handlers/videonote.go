@@ -26,10 +26,21 @@ func (h *Handler) VideoNoteHandler(ctx context.Context, b *bot.Bot, update *mode
 	// 1. Проверка прав и баланса
 	isAdmin := userID == h.Config.AdminID
 	cost := int64(h.Config.VideoNoteCredits)
+	useFreeNote := false
 
-	if !isAdmin {
-		// Проверяем баланс
-		if h.DB != nil {
+	if !isAdmin && h.DB != nil {
+		// Сначала проверяем бесплатные кружочки
+		freeRemaining, err := h.DB.GetFreeVideoNotesRemaining(userID, h.Config.FreeVideoNotesPerMonth)
+		if err != nil {
+			log.Printf("Failed to get free video notes: %v", err)
+			// Продолжаем с проверкой кредитов
+			freeRemaining = 0
+		}
+
+		if freeRemaining > 0 {
+			useFreeNote = true
+		} else {
+			// Проверяем баланс кредитов
 			balance, err := h.DB.GetUserCredits(userID)
 			if err != nil {
 				log.Printf("Failed to get user credits: %v", err)
@@ -39,7 +50,7 @@ func (h *Handler) VideoNoteHandler(ctx context.Context, b *bot.Bot, update *mode
 				})
 				return
 			}
-			
+
 			if balance < cost {
 				h.sendInsufficientCreditsMessage(ctx, b, chatID, int(cost), balance)
 				return
@@ -106,10 +117,17 @@ func (h *Handler) VideoNoteHandler(ctx context.Context, b *bot.Bot, update *mode
 
 	// 6. Списание средств (перед отправкой, но после успешной генерации)
 	if !isAdmin && h.DB != nil {
-		err := h.DB.SpendCredits(userID, cost, "Video Note Karaoke")
-		if err != nil {
-			log.Printf("Failed to spend credits: %v", err)
-			// Продолжаем, но логируем ошибку
+		if useFreeNote {
+			// Используем бесплатный кружочек
+			if err := h.DB.UseFreeVideoNote(userID); err != nil {
+				log.Printf("Failed to use free video note: %v", err)
+			}
+		} else {
+			// Списываем кредиты
+			err := h.DB.SpendCredits(userID, cost, "Video Note Karaoke")
+			if err != nil {
+				log.Printf("Failed to spend credits: %v", err)
+			}
 		}
 	}
 
