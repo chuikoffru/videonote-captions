@@ -64,6 +64,51 @@ func (h *Handler) sendInsufficientCreditsMessage(ctx context.Context, b *bot.Bot
 	})
 }
 
+// sendFreeNotesExhaustedMessage отправляет сообщение об исчерпании бесплатных кружочков
+func (h *Handler) sendFreeNotesExhaustedMessage(ctx context.Context, b *bot.Bot, chatID int64, balance int64) {
+	// Вычисляем дату следующего сброса (1 число следующего месяца)
+	now := time.Now()
+	nextReset := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, now.Location())
+
+	text := fmt.Sprintf("🎬 Бесплатные кружочки в этом месяце закончились!\n\n"+
+		"🔄 Лимит сбросится: %s\n"+
+		"💰 Стоимость 1 кружочка: %d %s\n"+
+		"💳 Ваш баланс: %d %s\n\n"+
+		"🛒 Выберите пакет для пополнения:",
+		nextReset.Format("02.01.2006"),
+		h.Config.VideoNoteCredits, formatCreditsWord(int64(h.Config.VideoNoteCredits)),
+		balance, formatCreditsWord(balance))
+
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{
+					Text:         fmt.Sprintf("🪙 %d кредитов — %d ₽", h.Config.CreditPackage1Amount, h.Config.CreditPackage1Price),
+					CallbackData: "buy:1",
+				},
+			},
+			{
+				{
+					Text:         fmt.Sprintf("🪙 %d кредитов — %d ₽ (выгода!)", h.Config.CreditPackage2Amount, h.Config.CreditPackage2Price),
+					CallbackData: "buy:2",
+				},
+			},
+			{
+				{
+					Text:         fmt.Sprintf("🪙 %d кредитов — %d ₽ (лучшая цена!)", h.Config.CreditPackage3Amount, h.Config.CreditPackage3Price),
+					CallbackData: "buy:3",
+				},
+			},
+		},
+	}
+
+	b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:      chatID,
+		Text:        text,
+		ReplyMarkup: keyboard,
+	})
+}
+
 // BuyHandler обрабатывает команду /buy - показывает пакеты кредитов
 func (h *Handler) BuyHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil || update.Message.From == nil {
@@ -79,19 +124,38 @@ func (h *Handler) BuyHandler(ctx context.Context, b *bot.Bot, update *models.Upd
 		return
 	}
 
+	userID := update.Message.From.ID
+
 	// Регистрируем пользователя
 	if h.DB != nil {
-		h.DB.GetOrCreateUser(update.Message.From.ID, update.Message.From.Username, update.Message.From.FirstName, update.Message.From.LastName)
+		h.DB.GetOrCreateUser(userID, update.Message.From.Username, update.Message.From.FirstName, update.Message.From.LastName)
 	}
 
 	// Получаем текущий баланс
 	var credits int64
 	if h.DB != nil {
-		credits, _ = h.DB.GetUserCredits(update.Message.From.ID)
+		credits, _ = h.DB.GetUserCredits(userID)
 	}
 
-	text := fmt.Sprintf("💰 *Ваш текущий баланс:* %d %s\n\n", credits, formatCreditsWord(credits))
-	text += "🛒 *Выберите пакет кредитов:*"
+	text := fmt.Sprintf("💰 Ваш текущий баланс: %d %s\n\n", credits, formatCreditsWord(credits))
+
+	// Добавляем информацию о бесплатных кружочках
+	if h.DB != nil && h.Config.FreeVideoNotesPerMonth > 0 {
+		freeRemaining, err := h.DB.GetFreeVideoNotesRemaining(userID, h.Config.FreeVideoNotesPerMonth)
+		if err == nil {
+			// Вычисляем количество использованных
+			freeUsed := h.Config.FreeVideoNotesPerMonth - freeRemaining
+			
+			// Вычисляем дату следующего сброса (1 число следующего месяца)
+			now := time.Now()
+			nextReset := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, now.Location())
+			
+			text += fmt.Sprintf("🎬 Бесплатные кружочки: %d из %d\n", freeUsed, h.Config.FreeVideoNotesPerMonth)
+			text += fmt.Sprintf("🔄 Обновление лимитов: %s\n\n", nextReset.Format("02.01.2006"))
+		}
+	}
+
+	text += "🛒 Выберите пакет кредитов:"
 
 	// Создаём кнопки с пакетами
 	keyboard := &models.InlineKeyboardMarkup{
@@ -120,7 +184,6 @@ func (h *Handler) BuyHandler(ctx context.Context, b *bot.Bot, update *models.Upd
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      update.Message.Chat.ID,
 		Text:        text,
-		ParseMode:   models.ParseModeMarkdown,
 		ReplyMarkup: keyboard,
 	})
 }

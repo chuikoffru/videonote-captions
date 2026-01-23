@@ -40,7 +40,7 @@ func (h *Handler) VideoNoteHandler(ctx context.Context, b *bot.Bot, update *mode
 		if freeRemaining > 0 {
 			useFreeNote = true
 		} else {
-			// Проверяем баланс кредитов
+			// Бесплатные кружочки закончились, проверяем баланс кредитов
 			balance, err := h.DB.GetUserCredits(userID)
 			if err != nil {
 				log.Printf("Failed to get user credits: %v", err)
@@ -52,9 +52,11 @@ func (h *Handler) VideoNoteHandler(ctx context.Context, b *bot.Bot, update *mode
 			}
 
 			if balance < cost {
-				h.sendInsufficientCreditsMessage(ctx, b, chatID, int(cost), balance)
+				// Показываем сообщение об исчерпании бесплатных кружочков и недостатке кредитов
+				h.sendFreeNotesExhaustedMessage(ctx, b, chatID, balance)
 				return
 			}
+			// Если кредитов хватает - продолжаем обработку, они будут списаны после
 		}
 	}
 
