@@ -2,6 +2,7 @@ package transcription
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -39,6 +40,9 @@ func New(apiKey, proxyURL string) *Service {
 			config.HTTPClient = &http.Client{
 				Transport: &http.Transport{
 					Proxy: http.ProxyURL(proxyParsed),
+					// Отключаем HTTP/2 к прокси: многие HTTPS-прокси не умеют
+					// CONNECT поверх HTTP/2 и рвут соединение ("unexpected EOF").
+					TLSNextProto: make(map[string]func(string, *tls.Conn) http.RoundTripper),
 				},
 			}
 		}

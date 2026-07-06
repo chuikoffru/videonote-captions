@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"log"
 	"net/http"
 	"net/url"
@@ -160,6 +161,9 @@ func main() {
 			Timeout: pollTimeout + 30*time.Second,
 			Transport: &http.Transport{
 				Proxy: http.ProxyURL(proxyURL),
+				// Отключаем HTTP/2 к прокси: многие HTTPS-прокси не умеют
+				// CONNECT поверх HTTP/2 и рвут соединение ("unexpected EOF").
+				TLSNextProto: make(map[string]func(string, *tls.Conn) http.RoundTripper),
 			},
 		}
 		opts = append(opts, bot.WithHTTPClient(pollTimeout, httpClient))

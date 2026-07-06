@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/url"
 	"time"
@@ -23,6 +24,9 @@ func Init(proxyURL string) error {
 	}
 	shared.Transport = &http.Transport{
 		Proxy: http.ProxyURL(parsed),
+		// Отключаем HTTP/2 к прокси: многие HTTPS-прокси не умеют
+		// CONNECT поверх HTTP/2 и рвут соединение ("unexpected EOF").
+		TLSNextProto: make(map[string]func(string, *tls.Conn) http.RoundTripper),
 	}
 	return nil
 }
