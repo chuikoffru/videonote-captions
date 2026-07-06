@@ -150,21 +150,35 @@ func (h *Handler) VideoNoteHandler(ctx context.Context, b *bot.Bot, update *mode
 	}
 	defer videoFile.Close()
 
-	_, err = b.SendVideoNote(ctx, &bot.SendVideoNoteParams{
+	sentNote, err := b.SendVideoNote(ctx, &bot.SendVideoNoteParams{
 		ChatID:    chatID,
 		VideoNote: &models.InputFileUpload{Filename: "video_note.mp4", Data: videoFile},
 		// Duration: videoNote.Duration, // Можно добавить оригинальную длительность
 		// Length: videoNote.Length,
 	})
-	
+
 	if err != nil {
 		log.Printf("Failed to send video note: %v", err)
 		h.updateStatus(ctx, b, chatID, statusMsg.ID, "❌ Ошибка отправки результата.")
-	} else {
-		// Удаляем статусное сообщение при успехе
-		b.DeleteMessage(ctx, &bot.DeleteMessageParams{
-			ChatID:    chatID,
-			MessageID: statusMsg.ID,
-		})
+		return
+	}
+
+	// Удаляем статусное сообщение при успехе
+	b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+		ChatID:    chatID,
+		MessageID: statusMsg.ID,
+	})
+
+	// Всегда отправляем транскрипт отдельным сообщением под кружком
+	replyTo := &models.ReplyParameters{MessageID: msg.ID}
+	if sentNote != nil {
+		replyTo = &models.ReplyParameters{MessageID: sentNote.ID}
+	}
+	if _, err := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          chatID,
+		Text:            "📝 Транскрипт:\n\n" + transcriptionResult.Text,
+		ReplyParameters: replyTo,
+	}); err != nil {
+		log.Printf("Failed to send transcript: %v", err)
 	}
 }
