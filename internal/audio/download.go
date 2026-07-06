@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"telegram-voice-video-bot/internal/httpclient"
+
 	"github.com/go-telegram/bot"
 	"os/exec"
 )
@@ -33,7 +35,7 @@ func DownloadVideoNote(ctx context.Context, b *bot.Bot, fileID, botToken string)
 	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", botToken, file.FilePath)
 
 	// Скачиваем файл
-	resp, err := http.Get(fileURL)
+	resp, err := httpclient.Get(fileURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to download file: %w", err)
 	}
@@ -92,7 +94,7 @@ func DownloadAudio(ctx context.Context, b *bot.Bot, fileID, botToken string) (st
 	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", botToken, file.FilePath)
 
 	// Скачиваем файл
-	resp, err := http.Get(fileURL)
+	resp, err := httpclient.Get(fileURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to download file: %w", err)
 	}

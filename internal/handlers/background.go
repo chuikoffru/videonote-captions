@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
+
+	"telegram-voice-video-bot/internal/httpclient"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -99,7 +100,7 @@ func (h *Handler) PhotoHandler(ctx context.Context, b *bot.Bot, update *models.U
 
 // downloadFile скачивает файл по URL и сохраняет локально
 func downloadFile(url, filepath string) error {
-	resp, err := http.Get(url)
+	resp, err := httpclient.Get(url)
 	if err != nil {
 		return err
 	}

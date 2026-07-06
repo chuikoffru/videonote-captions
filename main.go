@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"telegram-voice-video-bot/internal/config"
 	"telegram-voice-video-bot/internal/database"
 	"telegram-voice-video-bot/internal/handlers"
+	"telegram-voice-video-bot/internal/httpclient"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -21,6 +25,11 @@ func main() {
 
 	if cfg.BotToken == "" {
 		log.Fatal("BOT_TOKEN is required")
+	}
+
+	// Настраиваем общий HTTP-клиент для скачивания файлов Telegram через прокси
+	if err := httpclient.Init(cfg.Proxy); err != nil {
+		log.Fatalf("Invalid PROXY url: %v", err)
 	}
 
 	// Инициализируем базу данных
@@ -135,6 +144,26 @@ func main() {
 			"callback_query",
 			"pre_checkout_query",
 		}),
+	}
+
+	// Если задан PROXY — направляем запросы к Telegram API через прокси
+	// (api.telegram.org может быть недоступен напрямую с сервера).
+	if cfg.Proxy != "" {
+		proxyURL, err := url.Parse(cfg.Proxy)
+		if err != nil {
+			log.Fatalf("Invalid PROXY url: %v", err)
+		}
+		// pollTimeout по умолчанию 60s (long polling getUpdates);
+		// таймаут клиента ставим с запасом, чтобы не обрывать опрос.
+		pollTimeout := time.Minute
+		httpClient := &http.Client{
+			Timeout: pollTimeout + 30*time.Second,
+			Transport: &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+			},
+		}
+		opts = append(opts, bot.WithHTTPClient(pollTimeout, httpClient))
+		log.Println("🌐 Telegram API через прокси включён")
 	}
 
 	b, err := bot.New(cfg.BotToken, opts...)

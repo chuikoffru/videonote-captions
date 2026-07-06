@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"telegram-voice-video-bot/internal/httpclient"
+
 	"github.com/go-telegram/bot"
 )
 
@@ -70,7 +72,7 @@ func Download(ctx context.Context, b *bot.Bot, targetID int64, targetType, botTo
 
 	// Скачиваем файл
 	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", botToken, file.FilePath)
-	resp, err := http.Get(fileURL)
+	resp, err := httpclient.Get(fileURL)
 	if err != nil {
 		return createDefaultAvatar(tempDir)
 	}
