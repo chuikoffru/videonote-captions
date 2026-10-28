@@ -6,23 +6,12 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
+	"videonote-captions/internal/database"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 )
-
-// PendingCreditPurchases хранилище ожидающих покупок кредитов
-var PendingCreditPurchases sync.Map
-
-// CreditPurchaseData данные о покупке кредитов
-type CreditPurchaseData struct {
-	UserID    int64
-	Amount    int // Количество кредитов
-	PriceRub  int // Цена в рублях
-	Timestamp int64
-}
 
 // sendInsufficientCreditsMessage отправляет сообщение о недостатке кредитов с кнопками покупки
 func (h *Handler) sendInsufficientCreditsMessage(ctx context.Context, b *bot.Bot, chatID int64, needed int, balance int64) {
@@ -115,15 +104,6 @@ func (h *Handler) BuyHandler(ctx context.Context, b *bot.Bot, update *models.Upd
 		return
 	}
 
-	// Проверяем, настроен ли YuKassa
-	if h.Config.YuKassaToken == "" {
-		b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: update.Message.Chat.ID,
-			Text:   "❌ Оплата временно недоступна. Попробуйте позже.",
-		})
-		return
-	}
-
 	userID := update.Message.From.ID
 
 	// Регистрируем пользователя
@@ -145,12 +125,12 @@ func (h *Handler) BuyHandler(ctx context.Context, b *bot.Bot, update *models.Upd
 		if err == nil {
 			// Вычисляем количество использованных
 			freeUsed := h.Config.FreeVideoNotesPerMonth - freeRemaining
-			
+
 			// Вычисляем дату следующего сброса (1 число следующего месяца)
 			now := time.Now()
 			nextReset := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, now.Location())
-			
-			text += fmt.Sprintf("🎬 Бесплатные кружочки: %d из %d\n", freeUsed, h.Config.FreeVideoNotesPerMonth)
+
+			text += fmt.Sprintf("🎬 Использовано бесплатных кружочков: %d из %d\n", freeUsed, h.Config.FreeVideoNotesPerMonth)
 			text += fmt.Sprintf("🔄 Обновление лимитов: %s\n\n", nextReset.Format("02.01.2006"))
 		}
 	}
@@ -227,18 +207,26 @@ func (h *Handler) BuyCallbackHandler(ctx context.Context, b *bot.Bot, update *mo
 	}
 
 	userID := update.CallbackQuery.From.ID
+	if update.CallbackQuery.Message.Message == nil {
+		return
+	}
 	chatID := update.CallbackQuery.Message.Message.Chat.ID
 
 	// Генерируем payload для идентификации платежа
 	payloadID := fmt.Sprintf("credit:%d:%d:%d", userID, amount, time.Now().UnixNano())
 
 	// Сохраняем данные платежа
-	PendingCreditPurchases.Store(payloadID, CreditPurchaseData{
-		UserID:    userID,
-		Amount:    amount,
-		PriceRub:  price,
-		Timestamp: time.Now().Unix(),
-	})
+	if h.DB == nil || h.Config.YuKassaToken == "" || update.CallbackQuery.Message.Message == nil {
+		return
+	}
+	if _, err := h.DB.GetOrCreateUser(userID, update.CallbackQuery.From.Username, update.CallbackQuery.From.FirstName, update.CallbackQuery.From.LastName); err != nil {
+		log.Printf("Register buyer: %v", err)
+		return
+	}
+	if err := h.DB.CreateOrder(database.PaymentOrder{Payload: payloadID, UserID: userID, Amount: amount, PriceRub: price}); err != nil {
+		log.Printf("Create order: %v", err)
+		return
+	}
 
 	log.Printf("Создаём invoice для покупки кредитов: user=%d, amount=%d, price=%d RUB", userID, amount, price)
 
@@ -315,13 +303,10 @@ func (h *Handler) CreditPreCheckoutHandler(ctx context.Context, b *bot.Bot, upda
 		return
 	}
 
-	if _, ok := PendingCreditPurchases.Load(payload); !ok {
-		log.Printf("CreditPreCheckoutQuery: payload not found")
-		b.AnswerPreCheckoutQuery(ctx, &bot.AnswerPreCheckoutQueryParams{
-			PreCheckoutQueryID: update.PreCheckoutQuery.ID,
-			OK:                 false,
-			ErrorMessage:       "❌ Заказ устарел. Пожалуйста, попробуйте снова через /buy",
-		})
+	p, err := h.DB.GetOrder(payload)
+	q := update.PreCheckoutQuery
+	if err != nil || p.Paid || p.UserID != q.From.ID || p.PriceRub*100 != q.TotalAmount || q.Currency != "RUB" {
+		b.AnswerPreCheckoutQuery(ctx, &bot.AnswerPreCheckoutQueryParams{PreCheckoutQueryID: q.ID, OK: false, ErrorMessage: "Заказ недействителен. Используйте /buy"})
 		return
 	}
 
@@ -350,45 +335,18 @@ func (h *Handler) CreditSuccessfulPaymentHandler(ctx context.Context, b *bot.Bot
 		return
 	}
 
-	value, ok := PendingCreditPurchases.Load(payload)
-	if !ok {
-		log.Printf("CreditSuccessfulPayment: payload not found")
-		b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: update.Message.Chat.ID,
-			Text:   "❌ Ошибка: данные платежа не найдены. Обратитесь в поддержку.",
-		})
+	payment := update.Message.SuccessfulPayment
+	if update.Message.From == nil {
 		return
 	}
-
-	purchaseData := value.(CreditPurchaseData)
-	PendingCreditPurchases.Delete(payload)
-
-	// Начисляем кредиты
-	if h.DB != nil {
-		telegramPaymentChargeID := update.Message.SuccessfulPayment.TelegramPaymentChargeID
-		description := fmt.Sprintf("Покупка %d кредитов за %d ₽", purchaseData.Amount, purchaseData.PriceRub)
-
-		err := h.DB.AddCredits(purchaseData.UserID, int64(purchaseData.Amount), "purchase", description, telegramPaymentChargeID)
-		if err != nil {
-			log.Printf("Ошибка начисления кредитов: %v", err)
-			b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID: update.Message.Chat.ID,
-				Text:   "❌ Ошибка при начислении кредитов. Обратитесь в поддержку с ID платежа: " + telegramPaymentChargeID,
-			})
-			return
-		}
-
-		// Получаем новый баланс
-		newBalance, _ := h.DB.GetUserCredits(purchaseData.UserID)
-
-		log.Printf("Кредиты начислены: user=%d, amount=%d, new_balance=%d", purchaseData.UserID, purchaseData.Amount, newBalance)
-
-		b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:    update.Message.Chat.ID,
-			Text:      fmt.Sprintf("✅ *Баланс пополнен!*\n\n💰 Начислено: +%d %s\n💳 Ваш баланс: %d %s", purchaseData.Amount, formatCreditsWord(int64(purchaseData.Amount)), newBalance, formatCreditsWord(newBalance)),
-			ParseMode: models.ParseModeMarkdown,
-		})
+	userID := update.Message.From.ID
+	if err := h.DB.CompleteOrder(payload, userID, payment.TotalAmount, payment.Currency, payment.TelegramPaymentChargeID); err != nil {
+		log.Printf("Complete payment: %v", err)
+		b.SendMessage(ctx, &bot.SendMessageParams{ChatID: update.Message.Chat.ID, Text: "Не удалось зачислить платёж. Обратитесь в поддержку с ID: " + payment.TelegramPaymentChargeID})
+		return
 	}
+	balance, _ := h.DB.GetUserCredits(userID)
+	b.SendMessage(ctx, &bot.SendMessageParams{ChatID: update.Message.Chat.ID, Text: fmt.Sprintf("✅ Платёж учтён. Баланс: %d кредитов", balance)})
 }
 
 // formatCreditsWord возвращает правильное склонение слова "кредит"

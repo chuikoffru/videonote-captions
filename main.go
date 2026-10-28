@@ -9,12 +9,13 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
-	"telegram-voice-video-bot/internal/config"
-	"telegram-voice-video-bot/internal/database"
-	"telegram-voice-video-bot/internal/handlers"
-	"telegram-voice-video-bot/internal/httpclient"
+	"videonote-captions/internal/config"
+	"videonote-captions/internal/database"
+	"videonote-captions/internal/handlers"
+	"videonote-captions/internal/httpclient"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -23,9 +24,18 @@ import (
 func main() {
 	// Загружаем конфигурацию
 	cfg := config.Load()
+	loc, err := time.LoadLocation("Europe/Moscow")
+	if err != nil {
+		log.Fatal(err)
+	}
+	time.Local = loc
 
 	if cfg.BotToken == "" {
 		log.Fatal("BOT_TOKEN is required")
+	}
+
+	if cfg.OpenAIAPIKey == "" || cfg.DatabaseURL == "" {
+		log.Fatal("OPENAI_API_KEY and DATABASE_URL are required")
 	}
 
 	// Настраиваем общий HTTP-клиент для скачивания файлов Telegram через прокси
@@ -34,14 +44,13 @@ func main() {
 	}
 
 	// Инициализируем базу данных
-	db, err := database.New("data/bot.db")
+	db, err := database.New(cfg.DatabaseURL)
 	if err != nil {
-		log.Printf("Warning: Failed to initialize database: %v", err)
-		db = nil // Бот будет работать без базы данных
+		log.Fatalf("Failed to initialize Postgres: %v", err)
 	}
 
 	// Создаём контекст с обработкой сигналов
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	// Создаём глобальный обработчик
@@ -50,17 +59,6 @@ func main() {
 	// Создаём бота с defaultHandler который обрабатывает ВСЕ типы обновлений
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
-			// Логируем входящие обновления для отладки
-			if update.Message != nil {
-				log.Printf("Update: Message received, has Voice: %v, has SuccessfulPayment: %v, Text: %s",
-					update.Message.Voice != nil, update.Message.SuccessfulPayment != nil, update.Message.Text)
-			}
-			if update.PreCheckoutQuery != nil {
-				log.Printf("Update: PreCheckoutQuery received")
-			}
-			if update.CallbackQuery != nil {
-				log.Printf("Update: CallbackQuery received, data: %s", update.CallbackQuery.Data)
-			}
 
 			// Обрабатываем команду /start
 			if update.Message != nil && update.Message.Text == "/start" {
@@ -92,21 +90,8 @@ func main() {
 				return
 			}
 
-			// Обрабатываем фото (кастомные фоны)
-			if update.Message != nil && update.Message.Photo != nil {
-				h.PhotoHandler(ctx, b, update)
-				return
-			}
-
-			// Обрабатываем Video Note (кружочки)
 			if update.Message != nil && update.Message.VideoNote != nil {
 				h.VideoNoteHandler(ctx, b, update)
-				return
-			}
-
-			// Обрабатываем голосовые сообщения
-			if update.Message != nil && update.Message.Voice != nil {
-				h.VoiceHandler(ctx, b, update)
 				return
 			}
 
@@ -128,16 +113,11 @@ func main() {
 					h.BuyCallbackHandler(ctx, b, update)
 					return
 				}
-				if strings.HasPrefix(update.CallbackQuery.Data, "horiz:") {
-					h.HorizontalCallbackHandler(ctx, b, update)
-					return
-				}
-				if strings.HasPrefix(update.CallbackQuery.Data, "vertcache:") {
-					h.VerticalCacheCallbackHandler(ctx, b, update)
-				} else if strings.HasPrefix(update.CallbackQuery.Data, "vert:") {
-					h.VerticalCallbackHandler(ctx, b, update)
-				}
+
 				return
+			}
+			if update.Message != nil {
+				h.HelpHandler(ctx, b, update)
 			}
 		}),
 		bot.WithAllowedUpdates(bot.AllowedUpdates{

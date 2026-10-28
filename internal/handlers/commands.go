@@ -31,7 +31,7 @@ func (h *Handler) StartHandler(ctx context.Context, b *bot.Bot, update *models.U
 
 	_, err := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: update.Message.Chat.ID,
-		Text:   "👋 Привет! Отправь мне голосовое сообщение или перешли чужое, и я создам видео с визуализацией аудио, аватаркой и субтитрами!",
+		Text:   "👋 Отправь кружочек — я добавлю субтитры: одно слово в момент его произнесения. /help — условия, /buy — баланс и кредиты.",
 	})
 	if err != nil {
 		log.Printf("Failed to send start message: %v", err)
@@ -44,20 +44,7 @@ func (h *Handler) HelpHandler(ctx context.Context, b *bot.Bot, update *models.Up
 		return
 	}
 
-	helpText := `🤖 <b>Как пользоваться ботом:</b>
-
-1️⃣ <b>Отправь голосовое сообщение</b> (или перешли его от другого пользователя/канала).
-2️⃣ Бот предложит выбрать формат видео: горизонтальное или вертикальное.
-3️⃣ <b>Первые 60 секунд</b> обработки бесплатно для каждого сообщения.
-4️⃣ Если сообщение длиннее, стоимость генерации списывается с баланса кредитов.
-
-💰 <b>Кредиты:</b>
-• Используй /buy чтобы проверить баланс и пополнить кредиты
-
-🖼️ <b>Кастомные фоны:</b>
-• Отправь фото — бот определит ориентацию и сохранит как фон для видео
-
-🚀 <b>Совет:</b> Пересылай голосовые сообщения из других чатов — бот возьмет аватарку и имя оригинального автора!`
+	helpText := fmt.Sprintf("Отправь или перешли видеокружочек. Я верну его с субтитрами — по одному слову, синхронно с речью — и полным текстом под ним.\n\nБесплатно: %d кружочка в месяц. Далее: %d кредитов за кружочек. /buy — баланс и пополнение.\n\nЗвук отправляется в OpenAI для распознавания речи.", h.Config.FreeVideoNotesPerMonth, h.Config.VideoNoteCredits)
 
 	_, err := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    update.Message.Chat.ID,
@@ -102,6 +89,9 @@ func (h *Handler) BroadcastHandler(ctx context.Context, b *bot.Bot, update *mode
 	}
 
 	// Получаем список всех пользователей
+	if h.DB == nil {
+		return
+	}
 	users, err := h.DB.GetAllUsers()
 	if err != nil {
 		log.Printf("Failed to get users for broadcast: %v", err)
@@ -184,40 +174,7 @@ func (h *Handler) UsageHandler(ctx context.Context, b *bot.Bot, update *models.U
 		return
 	}
 
-	usageText := fmt.Sprintf(`📊 *Статистика бота*
-
-*По пользователям:*
-👥 Пользователей: %d
-0️⃣ Ни одного видео: %d пользователей
-1️⃣ Только 1 видео: %d пользователей
-🚀 Больше 1 видео: %d пользователей
-
-*По типам видео:*
-📐 Вертикальных видео: %d
-📏 Горизонтальных видео: %d
-⚪ Кружочков: %d
-
-*По генерациям видео:*
-🎬 Бесплатных видео: %d
-💳 Запросов оплаты: %d
-✅ Оплаченных видео: %d
-
-*По деньгам:*
-💰 Сумма всех балансов: %d кредитов
-💸 Использовано средств: %d кредитов`,
-		stats.TotalUsers,
-		stats.UsersNoVideos,
-		stats.UsersOneVideo,
-		stats.UsersMoreVideos,
-		stats.VerticalVideos,
-		stats.HorizontalVideos,
-		stats.VideoNotes,
-		stats.FreeVideos,
-		stats.PaymentRequests,
-		stats.PaidVideos,
-		stats.TotalBalances,
-		stats.TotalSpent,
-	)
+	usageText := fmt.Sprintf("📊 Статистика\nПользователей: %d\nБез видео: %d\nОдно видео: %d\nБольше одного: %d\nКружочков: %d\nБесплатных: %d\nПлатных: %d\nСумма балансов: %d кредитов\nПотрачено: %d кредитов", stats.TotalUsers, stats.UsersNoVideos, stats.UsersOneVideo, stats.UsersMoreVideos, stats.VideoNotes, stats.FreeVideos, stats.PaidVideos, stats.TotalBalances, stats.TotalSpent)
 
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    update.Message.Chat.ID,

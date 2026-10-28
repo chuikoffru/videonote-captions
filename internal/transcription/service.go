@@ -84,15 +84,9 @@ func (s *Service) TranscribeAudio(ctx context.Context, audioPath string) (*Resul
 		})
 	}
 
-	// Если нет слов, создаём один сегмент с полным текстом
-	if len(result.Words) == 0 && result.Text != "" {
-		result.Words = []Word{{
-			Word:  result.Text,
-			Start: 0,
-			End:   5,
-		}}
+	if len(result.Words) == 0 {
+		return nil, fmt.Errorf("no word timestamps returned")
 	}
-
 	return result, nil
 }
 

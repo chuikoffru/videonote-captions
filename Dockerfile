@@ -1,40 +1,16 @@
-FROM golang:1.25.6-alpine AS builder
-
+ARG GO_IMAGE=golang:1.25.6-alpine
+ARG RUNTIME_IMAGE=alpine:3.23
+FROM ${GO_IMAGE} AS builder
 WORKDIR /app
-
-# Устанавливаем зависимости для CGO (SQLite)
-RUN apk add --no-cache gcc musl-dev
-
-# Копируем go.mod и go.sum для кэширования зависимостей
 COPY go.mod go.sum ./
 RUN go mod download
-
-# Копируем исходный код
 COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /bot .
 
-# Собираем приложение с CGO для SQLite
-RUN CGO_ENABLED=1 GOOS=linux go build -o bot .
-
-# ---
-
-FROM alpine:latest
-
-# Устанавливаем FFmpeg, шрифты и SQLite
-RUN apk add --no-cache \
-    ffmpeg \
-    font-noto \
-    font-noto-emoji \
-    ca-certificates \
-    sqlite \
-    tzdata
-
+FROM ${RUNTIME_IMAGE}
+RUN apk add --no-cache ffmpeg font-noto font-noto-emoji ca-certificates tzdata && adduser -D bot
 WORKDIR /app
-
-# Копируем бинарник из builder
-COPY --from=builder /app/bot /app/bot
-
-# Создаём директории для временных файлов и базы данных
-RUN mkdir -p temp data
-
+COPY --from=builder /bot /app/bot
+RUN mkdir temp && chown bot:bot temp
+USER bot
 CMD ["/app/bot"]
-

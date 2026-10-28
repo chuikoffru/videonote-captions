@@ -1,16 +1,9 @@
+# Production uses the same stack. Example:
+# docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 services:
   bot:
-    build: .
-    restart: unless-stopped
-    volumes:
-      - ./temp:/app/temp
-      - data:/app/data
-    env_file:
-      - .env
-
-volumes:
-  data:
-
-networks:
-  dokploy-network:
-    external: true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

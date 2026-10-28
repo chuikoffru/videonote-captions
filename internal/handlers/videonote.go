@@ -5,8 +5,8 @@ import (
 	"log"
 	"os"
 
-	"telegram-voice-video-bot/internal/audio"
-	"telegram-voice-video-bot/internal/video"
+	"videonote-captions/internal/audio"
+	"videonote-captions/internal/video"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -14,52 +14,43 @@ import (
 
 // VideoNoteHandler обрабатывает Video Note сообщения (кружочки)
 func (h *Handler) VideoNoteHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.Message == nil || update.Message.VideoNote == nil {
+	if update.Message == nil || update.Message.VideoNote == nil || update.Message.From == nil {
 		return
 	}
 
+	select {
+	case h.slots <- struct{}{}:
+		defer func() { <-h.slots }()
+	default:
+		b.SendMessage(ctx, &bot.SendMessageParams{ChatID: update.Message.Chat.ID, Text: "Бот занят обработкой. Попробуйте через минуту."})
+		return
+	}
 	msg := update.Message
 	userID := msg.From.ID
 	chatID := msg.Chat.ID
 	videoNote := msg.VideoNote
 
-	// 1. Проверка прав и баланса
-	isAdmin := userID == h.Config.AdminID
-	cost := int64(h.Config.VideoNoteCredits)
-	useFreeNote := false
-
-	if !isAdmin && h.DB != nil {
-		// Сначала проверяем бесплатные кружочки
-		freeRemaining, err := h.DB.GetFreeVideoNotesRemaining(userID, h.Config.FreeVideoNotesPerMonth)
-		if err != nil {
-			log.Printf("Failed to get free video notes: %v", err)
-			// Продолжаем с проверкой кредитов
-			freeRemaining = 0
-		}
-
-		if freeRemaining > 0 {
-			useFreeNote = true
-		} else {
-			// Бесплатные кружочки закончились, проверяем баланс кредитов
-			balance, err := h.DB.GetUserCredits(userID)
-			if err != nil {
-				log.Printf("Failed to get user credits: %v", err)
-				b.SendMessage(ctx, &bot.SendMessageParams{
-					ChatID: chatID,
-					Text:   "❌ Ошибка базы данных.",
-				})
-				return
-			}
-
-			if balance < cost {
-				// Показываем сообщение об исчерпании бесплатных кружочков и недостатке кредитов
-				h.sendFreeNotesExhaustedMessage(ctx, b, chatID, balance)
-				return
-			}
-			// Если кредитов хватает - продолжаем обработку, они будут списаны после
-		}
+	if h.DB == nil {
+		return
 	}
-
+	if _, err := h.DB.GetOrCreateUser(userID, msg.From.Username, msg.From.FirstName, msg.From.LastName); err != nil {
+		return
+	}
+	isAdmin := userID == h.Config.AdminID
+	useFreeNote, err := h.DB.ReserveNote(userID, h.Config.FreeVideoNotesPerMonth, h.Config.VideoNoteCredits, isAdmin)
+	if err != nil {
+		balance, _ := h.DB.GetUserCredits(userID)
+		h.sendFreeNotesExhaustedMessage(ctx, b, chatID, balance)
+		return
+	}
+	delivered := false
+	defer func() {
+		if !delivered {
+			if err := h.DB.RefundNote(userID, useFreeNote, h.Config.VideoNoteCredits, isAdmin); err != nil {
+				log.Printf("Refund failed for user %d: %v", userID, err)
+			}
+		}
+	}()
 	// Отправляем статус
 	statusMsg, err := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
@@ -117,32 +108,9 @@ func (h *Handler) VideoNoteHandler(ctx context.Context, b *bot.Bot, update *mode
 	}
 	defer os.Remove(outputVideoPath)
 
-	// 6. Списание средств (перед отправкой, но после успешной генерации)
-	if !isAdmin && h.DB != nil {
-		if useFreeNote {
-			// Используем бесплатный кружочек
-			if err := h.DB.UseFreeVideoNote(userID); err != nil {
-				log.Printf("Failed to use free video note: %v", err)
-			}
-		} else {
-			// Списываем кредиты
-			err := h.DB.SpendCredits(userID, cost, "Video Note Karaoke")
-			if err != nil {
-				log.Printf("Failed to spend credits: %v", err)
-			}
-		}
-	}
-
-	// Логируем создание video note
-	if h.DB != nil {
-		if err := h.DB.LogVideoNote(); err != nil {
-			log.Printf("Failed to log video note: %v", err)
-		}
-	}
-
 	// 7. Отправка результата
 	h.updateStatus(ctx, b, chatID, statusMsg.ID, "📤 Отправляю результат...")
-	
+
 	videoFile, err := os.Open(outputVideoPath)
 	if err != nil {
 		log.Printf("Failed to open output video: %v", err)
@@ -163,6 +131,12 @@ func (h *Handler) VideoNoteHandler(ctx context.Context, b *bot.Bot, update *mode
 		return
 	}
 
+	delivered = true
+	if sentNote != nil && sentNote.VideoNote != nil {
+		if err := h.DB.LogNote(userID, videoNote.Duration, sentNote.VideoNote.FileID, useFreeNote); err != nil {
+			log.Printf("Log note: %v", err)
+		}
+	}
 	// Удаляем статусное сообщение при успехе
 	b.DeleteMessage(ctx, &bot.DeleteMessageParams{
 		ChatID:    chatID,

@@ -2,26 +2,27 @@ package video
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"telegram-voice-video-bot/internal/transcription"
+	"videonote-captions/internal/transcription"
 )
 
-// AddSubtitlesToVideoNote накладывает субтитры с эффектом караоке на Video Note
+// AddSubtitlesToVideoNote накладывает субтитры по одному слову на Video Note
 func AddSubtitlesToVideoNote(videoPath string, transcriptionResult *transcription.Result) (string, error) {
 	tempDir := filepath.Dir(videoPath)
-	outputPath := filepath.Join(tempDir, fmt.Sprintf("karaoke_videonote_%d.mp4", time.Now().UnixNano()))
+	outputPath := filepath.Join(tempDir, fmt.Sprintf("captioned_videonote_%d.mp4", time.Now().UnixNano()))
 
-	// Создаём ASS файл субтитров с караоке
-	assPath, err := createKaraokeASS(transcriptionResult, tempDir)
+	// Создаём ASS файл субтитров
+	assPath, err := createWordASS(transcriptionResult, tempDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to create ASS subtitles: %w", err)
 	}
-	// defer os.Remove(assPath) // Оставляем для дебага пока что
+	defer os.Remove(assPath)
 
 	// Экранируем путь для фильтра
 	escapedASSPath := escapeSubtitlePath(assPath)
@@ -36,6 +37,8 @@ func AddSubtitlesToVideoNote(videoPath string, transcriptionResult *transcriptio
 		"-c:v", "libx264",
 		"-preset", "medium",
 		"-crf", "23",
+		"-pix_fmt", "yuv420p",
+		"-movflags", "+faststart",
 		"-c:a", "copy", // Аудио оставляем без изменений
 		"-y",
 		outputPath,
@@ -49,8 +52,8 @@ func AddSubtitlesToVideoNote(videoPath string, transcriptionResult *transcriptio
 	return outputPath, nil
 }
 
-// createKaraokeASS создаёт ASS файл с караоке подсветкой
-func createKaraokeASS(result *transcription.Result, tempDir string) (string, error) {
+// createWordASS создаёт ASS файл с отдельным событием для каждого слова
+func createWordASS(result *transcription.Result, tempDir string) (string, error) {
 	assPath := filepath.Join(tempDir, fmt.Sprintf("subs_%d.ass", time.Now().UnixNano()))
 	file, err := os.Create(assPath)
 	if err != nil {
@@ -69,7 +72,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Karaoke,Arial,52,&H0000FFFF,&H00FFFFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,0,2,40,40,50,1
+Style: Word,Noto Sans,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,0,2,40,40,50,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -82,97 +85,25 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 		return assPath, nil // Пустой файл если нет слов
 	}
 
-	// Группируем слова в фразы (по 3-5 слов или по паузам)
-	type karaokeWord struct {
-		Text     string
-		Duration int // в сантисекундах (для \k тега)
-	}
-	type karaokePhrase struct {
-		Start float64
-		End   float64
-		Words []karaokeWord
-		Raw   string // Для проверки
-	}
-
-	var phrases []karaokePhrase
-	var currentPhrase karaokePhrase
-	
-	maxWordsPerPhrase := 3
-	maxPhraseDuration := 2.5
-
-	// Инициализируем первую фразу
-	if len(result.Words) > 0 {
-		currentPhrase.Start = result.Words[0].Start
-	}
-
 	for i, word := range result.Words {
-		// Длительность слова в сантисекундах (1 cs = 10 ms) для тега \k
-		duration := word.End - word.Start
-		// Коррекция: иногда Whisper выдает наложение или разрывы.
-		// Эвристика: если есть следующее слово, длительность может быть до начала следующего
-		// Но \k работает внутри одной строки.
-		
-		kDuration := int(duration * 100)
-		if kDuration < 1 {
-			kDuration = 1
+		start, end := word.Start, word.End
+		text := strings.TrimSpace(word.Word)
+		if text == "" || math.IsNaN(start) || math.IsNaN(end) || math.IsInf(start, 0) || math.IsInf(end, 0) || start < 0 || end <= start {
+			continue
 		}
-
-		currentPhrase.Words = append(currentPhrase.Words, karaokeWord{
-			Text:     word.Word,
-			Duration: kDuration,
-		})
-
-		// Условие разрыва фразы
-		shouldBreak := len(currentPhrase.Words) >= maxWordsPerPhrase ||
-			(word.End-currentPhrase.Start) >= maxPhraseDuration ||
-			i == len(result.Words)-1
-
-		if shouldBreak {
-			currentPhrase.End = word.End
-			phrases = append(phrases, currentPhrase)
-			
-			// Начинаем новую фразу
-			currentPhrase = karaokePhrase{
-				Words: []karaokeWord{},
-			}
-			if i < len(result.Words)-1 {
-				currentPhrase.Start = result.Words[i+1].Start
+		for j := i + 1; j < len(result.Words); j++ {
+			next := result.Words[j]
+			if strings.TrimSpace(next.Word) != "" && next.End > next.Start && next.Start >= start {
+				end = math.Min(end, next.Start)
+				break
 			}
 		}
-	}
-
-	// Записываем события в файл
-	for _, p := range phrases {
-		startTime := formatASSTime(p.Start)
-		endTime := formatASSTime(p.End)
-		
-		var lineDialog strings.Builder
-		// {\k10}Word {\k20}Another
-		
-		// Вторичный цвет (SecondaryColour) используется для "заливки" в караоке (\k).
-		// В ASS: PrimaryColour - цвет уже спетого (или наоборот, зависит от плеера/рендерера, но обычно Primary - основной, Secondary - для караоке ДО спетия).
-		// Стандартный \k: цвет меняется слева направо. 
-		// Обычно Primary - это "будущий" цвет, а Secondary - "прошедший". Или наоборот.
-		// Проверим: \k закрашивает SecondaryColor поверх PrimaryColor. 
-		// Точнее: Текст отображается PrimaryColour. \k эффект закрашивает его SecondaryColour.
-		// Нам нужно: Неактивное слово (белое), активное/спетое (синее/желтое).
-		// В Style: Primary=&H00FFFFFF (Белый), Secondary=&H0000FFFF (Желтый).
-		// Эффект \kf или \K - плавная заливка. \k - блочная.
-		
-		// Формируем строку с тегами
-		lineDialog.WriteString("{\\k0}") // Начальный сброс
-		for _, w := range p.Words {
-			// добавляем пробел перед словом если это не первое слово, но в караоке это сложно.
-			// Обычно слова уже содержат пробелы или мы их добавляем.
-			// Whisper обычно дает слова без пробелов.
-			
-			// Используем \kf для плавной заливки (хайлайта)
-			lineDialog.WriteString(fmt.Sprintf("{\\kf%d}%s ", w.Duration, w.Text))
+		if end <= start {
+			continue
 		}
-
-		// Dialogue: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-		line := fmt.Sprintf("Dialogue: 0,%s,%s,Karaoke,,0,0,0,,%s\n", startTime, endTime, lineDialog.String())
-		if _, err := file.WriteString(line); err != nil {
+		// Neutralize ASS control sequences supplied by a transcription.
+		text = strings.NewReplacer("\\", "／", "{", "(", "}", ")", "\n", " ", "\r", " ").Replace(text)
+		if _, err := fmt.Fprintf(file, "Dialogue: 0,%s,%s,Word,,0,0,0,,%s\n", formatASSTime(start), formatASSTime(end), text); err != nil {
 			return "", err
 		}
 	}
@@ -182,10 +113,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 // formatASSTime форматирует время в ASS формат 0:00:00.00
 func formatASSTime(seconds float64) string {
+	seconds = math.Round(seconds*100) / 100
 	hours := int(seconds) / 3600
 	minutes := (int(seconds) % 3600) / 60
 	secs := int(seconds) % 60
-	cs := int((seconds - float64(int(seconds))) * 100) // centiseconds
+	cs := int(math.Round(seconds*100)) % 100 // centiseconds
 
 	return fmt.Sprintf("%d:%02d:%02d.%02d", hours, minutes, secs, cs)
+}
+
+func escapeSubtitlePath(path string) string {
+	return strings.NewReplacer("\\", "/", ":", "\\:", "'", "\\'", "[", "\\[", "]", "\\]", ",", "\\,").Replace(path)
 }

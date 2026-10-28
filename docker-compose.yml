@@ -1,10 +1,29 @@
 services:
   bot:
     build: .
-    restart: always
-    env_file:
-      - .env
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://videonote:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/videonote?sslmode=disable
+      TZ: Europe/Moscow
+    depends_on:
+      db:
+        condition: service_healthy
+    tmpfs:
+      - /app/temp:uid=1000,gid=1000,mode=0700
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: videonote
+      POSTGRES_USER: videonote
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     volumes:
-      - ./temp:/app/temp
-      - ./data:/app/data
-
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U videonote -d videonote"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  postgres_data:
