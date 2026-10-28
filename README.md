@@ -74,3 +74,11 @@ TEST_DATABASE_URL='postgres://user:password@localhost:5432/test?sslmode=disable'
 конкурентное списание и возврат лимита/кредитов. Без TEST_DATABASE_URL он пропускается.
 
 Реальный запуск требует токенов, проверки кружочка в Telegram и тестового платежа.
+
+## Dokploy с отдельной базой
+
+Укажите Compose Path `./docker-compose.dokploy.yml`. В Environment задайте
+`POSTGRES_URI` — внутренний URI отдельного Postgres-сервиса Dokploy, а также
+`BOT_TOKEN`, `OPENAI_API_KEY` и остальные настройки из `.env.example`.
+Бот подключается к внешней сети `dokploy-network`; второй Postgres не создаётся.
+`POSTGRES_URI` передаётся приложению как `DATABASE_URL`.
