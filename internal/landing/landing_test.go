@@ -113,3 +113,19 @@ func TestRussianFreeAllowanceDeclension(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPPreviewKeepsLanguageMetadataWithoutIndexing(t *testing.T) {
+	c := testConfig()
+	c.BaseURL = "http://captions-212-193-26-194.sslip.io"
+	c.Indexable = true
+	w := response(c, "/ru/")
+	b := w.Body.String()
+	if w.Header().Get("X-Robots-Tag") != "noindex, nofollow" {
+		t.Fatal("HTTP preview must not index")
+	}
+	for _, want := range []string{`rel="canonical" href="http://captions-212-193-26-194.sslip.io/ru/"`, `hreflang="en" href="http://captions-212-193-26-194.sslip.io/en/"`} {
+		if !strings.Contains(b, want) {
+			t.Fatalf("missing preview metadata: %s", want)
+		}
+	}
+}

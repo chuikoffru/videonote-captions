@@ -39,11 +39,14 @@ type page struct {
 
 func normalized(c Config) Config {
 	u, err := url.Parse(c.BaseURL)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || strings.ContainsAny(u.Host, "<>\" ") {
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || strings.ContainsAny(u.Host, "<>\" ") {
 		c.BaseURL = ""
 		c.Indexable = false
 	} else {
 		c.BaseURL = strings.TrimSuffix(u.String(), "/")
+		if u.Scheme != "https" {
+			c.Indexable = false
+		}
 	}
 	c.BotUsername = strings.TrimPrefix(strings.TrimSpace(c.BotUsername), "@")
 	if !username.MatchString(c.BotUsername) {
