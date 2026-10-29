@@ -2,6 +2,7 @@
 package landing
 
 import (
+	"crypto/sha256"
 	"embed"
 	"encoding/xml"
 	"fmt"
@@ -14,7 +15,7 @@ import (
 
 //go:embed templates/*.html assets/*
 var files embed.FS
-var pages = template.Must(template.ParseFS(files, "templates/*.html"))
+var pages = template.Must(template.New("pages").Funcs(template.FuncMap{"asset": assetURL}).ParseFS(files, "templates/*.html"))
 var username = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{4,31}$`)
 
 type Package struct{ Credits, PriceRub int }
@@ -237,4 +238,11 @@ func russianNotes(n int) string {
 	default:
 		return "кружочков"
 	}
+}
+
+// Content hashes prevent a cached stylesheet from surviving a deployment.
+func assetURL(name string) string {
+	data, _ := files.ReadFile("assets/" + name)
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("/assets/%s?v=%x", name, sum[:6])
 }
