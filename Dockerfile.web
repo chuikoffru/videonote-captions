@@ -1,0 +1,15 @@
+ARG GO_IMAGE=golang:1.25.6-alpine
+ARG RUNTIME_IMAGE=alpine:3.23
+FROM ${GO_IMAGE} AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /landing ./cmd/landing
+FROM ${RUNTIME_IMAGE}
+RUN apk add --no-cache ca-certificates tzdata && adduser -D web
+WORKDIR /app
+COPY --from=builder /landing /app/landing
+USER web
+EXPOSE 8080
+CMD ["/app/landing"]

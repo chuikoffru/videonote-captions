@@ -82,3 +82,33 @@ TEST_DATABASE_URL='postgres://user:password@localhost:5432/test?sslmode=disable'
 `BOT_TOKEN`, `OPENAI_API_KEY` и остальные настройки из `.env.example`.
 Бот подключается к внешней сети `dokploy-network`; второй Postgres не создаётся.
 `POSTGRES_URI` передаётся приложению как `DATABASE_URL`.
+
+## RU/EN website and source tracking
+
+The Dokploy stack also runs a separate `web` service from `Dockerfile.web`.
+It has no database access or bot credentials. Set public environment values:
+
+```env
+BOT_USERNAME=AudioVisualizerBot
+SITE_BASE_URL=http://your-temporary-host
+SITE_INDEXABLE=false
+```
+
+The temporary site stays `noindex`. For the permanent HTTPS domain set its full
+URL in `SITE_BASE_URL`, then enable `SITE_INDEXABLE=true` and redeploy. Language
+pages are `/ru/` and `/en/`, with localized metadata, canonical/hreflang,
+`robots.txt` and `sitemap.xml`. Shared pricing variables keep site and bot in sync.
+Run locally with `BOT_USERNAME=AudioVisualizerBot go run ./cmd/landing` (port 8080).
+The round demo is an illustration, not a customer recording.
+
+Bot commands: `/language ru`, `/language en`; captions retain the spoken language.
+Links such as `https://t.me/AudioVisualizerBot?start=en_home_hero` record first and
+latest source in Postgres with a start-event history. Payloads allow only 1–64
+ASCII letters, digits, `_` and `-`; empty starts record `direct`. Language hints
+`ru_` and `en_` select the interface language. `/sources` is admin-only and reports
+users, activated users and paying users by first source. Existing users lacking
+tracked attribution appear as `unknown`; conversions before the first recorded
+start do not count toward a newly recorded source. Repeated conversions are
+counted once per user. Sources are self-reported link labels, not authenticated
+proof that a visitor came from a search engine. No external analytics identifier
+is configured automatically.

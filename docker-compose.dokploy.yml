@@ -16,6 +16,32 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      BASE_URL: ${SITE_BASE_URL:-http://localhost:8080}
+      BOT_USERNAME: ${BOT_USERNAME:-}
+      SITE_INDEXABLE: ${SITE_INDEXABLE:-false}
+      FREE_VIDEO_NOTES_PER_MONTH: ${FREE_VIDEO_NOTES_PER_MONTH:-3}
+      VIDEO_NOTE_CREDITS: ${VIDEO_NOTE_CREDITS:-10}
+      CREDIT_PACKAGE_1_AMOUNT: ${CREDIT_PACKAGE_1_AMOUNT:-100}
+      CREDIT_PACKAGE_1_PRICE: ${CREDIT_PACKAGE_1_PRICE:-99}
+      CREDIT_PACKAGE_2_AMOUNT: ${CREDIT_PACKAGE_2_AMOUNT:-300}
+      CREDIT_PACKAGE_2_PRICE: ${CREDIT_PACKAGE_2_PRICE:-249}
+      CREDIT_PACKAGE_3_AMOUNT: ${CREDIT_PACKAGE_3_AMOUNT:-1000}
+      CREDIT_PACKAGE_3_PRICE: ${CREDIT_PACKAGE_3_PRICE:-749}
+    networks:
+      - dokploy-network
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
 networks:
   dokploy-network:
     external: true

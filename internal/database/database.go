@@ -17,6 +17,10 @@ type User struct {
 	Username            string
 	FirstName           string
 	LastName            string
+	Language            string
+	FirstSource         string `gorm:"index"`
+	LastSource          string
+	FirstStartedAt      *time.Time
 	Credits             int64     `gorm:"default:0"` // Баланс кредитов
 	FreeVideoNotesUsed  int       `gorm:"default:0"` // Использовано бесплатных кружочков в этом месяце
 	FreeVideoNotesReset time.Time // Дата последнего сброса счетчика
@@ -81,7 +85,7 @@ func New(dbPath string) (*DB, error) {
 	}
 
 	// Автомиграция
-	if err := db.AutoMigrate(&User{}, &VideoLog{}, &Stats{}, &PaymentOrder{}, &CreditTransaction{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &VideoLog{}, &Stats{}, &PaymentOrder{}, &CreditTransaction{}, &StartEvent{}); err != nil {
 		return nil, err
 	}
 

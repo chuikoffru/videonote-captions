@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"videonote-captions/internal/attribution"
 	"videonote-captions/internal/config"
 	"videonote-captions/internal/database"
 	"videonote-captions/internal/handlers"
@@ -60,34 +61,33 @@ func main() {
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
 
-			// Обрабатываем команду /start
-			if update.Message != nil && update.Message.Text == "/start" {
-				h.StartHandler(ctx, b, update)
+			if update == nil {
 				return
 			}
-
-			// Обрабатываем команду /help
-			if update.Message != nil && update.Message.Text == "/help" {
-				h.HelpHandler(ctx, b, update)
-				return
-			}
-
-			// Обрабатываем команду /broadcast (только для админа)
-			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/broadcast") {
-				h.BroadcastHandler(ctx, b, update)
-				return
-			}
-
-			// Обрабатываем команду /usage (только для админа)
-			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/usage") {
-				h.UsageHandler(ctx, b, update)
-				return
-			}
-
-			// Обрабатываем команду /buy
-			if update.Message != nil && strings.HasPrefix(update.Message.Text, "/buy") {
-				h.BuyHandler(ctx, b, update)
-				return
+			if update.Message != nil {
+				switch attribution.Command(update.Message.Text) {
+				case "start":
+					h.StartHandler(ctx, b, update)
+					return
+				case "help":
+					h.HelpHandler(ctx, b, update)
+					return
+				case "broadcast":
+					h.BroadcastHandler(ctx, b, update)
+					return
+				case "usage":
+					h.UsageHandler(ctx, b, update)
+					return
+				case "buy":
+					h.BuyHandler(ctx, b, update)
+					return
+				case "language":
+					h.LanguageHandler(ctx, b, update)
+					return
+				case "sources":
+					h.SourcesHandler(ctx, b, update)
+					return
+				}
 			}
 
 			if update.Message != nil && update.Message.VideoNote != nil {
