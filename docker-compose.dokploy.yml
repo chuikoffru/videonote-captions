@@ -7,6 +7,8 @@ services:
     environment:
       DATABASE_URL: ${POSTGRES_URI:?Set POSTGRES_URI in Dokploy Environment}
       TZ: Europe/Moscow
+      ENABLE_VIDEO_TO_CIRCLE: ${ENABLE_VIDEO_TO_CIRCLE:-true}
+      PLAIN_CIRCLES_PER_DAY: ${PLAIN_CIRCLES_PER_DAY:-5}
     tmpfs:
       - /app/temp:uid=1000,gid=1000,mode=0700
     networks:
@@ -26,7 +28,7 @@ services:
       BASE_URL: ${SITE_BASE_URL:-http://localhost:8080}
       BOT_USERNAME: ${BOT_USERNAME:-}
       SITE_INDEXABLE: ${SITE_INDEXABLE:-false}
-      ENABLE_VIDEO_TO_CIRCLE: ${ENABLE_VIDEO_TO_CIRCLE:-false}
+      ENABLE_VIDEO_TO_CIRCLE: ${ENABLE_VIDEO_TO_CIRCLE:-true}
       PLAIN_CIRCLES_PER_DAY: ${PLAIN_CIRCLES_PER_DAY:-5}
       MAX_INPUT_VIDEO_BYTES: ${MAX_INPUT_VIDEO_BYTES:-20971520}
       MAX_INPUT_VIDEO_SECONDS: ${MAX_INPUT_VIDEO_SECONDS:-600}
