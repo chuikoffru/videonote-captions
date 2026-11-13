@@ -42,7 +42,9 @@ type CreditTransaction struct {
 
 // VideoLog хранит лог созданных видео
 type VideoLog struct {
-	ID          uint `gorm:"primaryKey"`
+	Operation   string `gorm:"not null;default:captioned_note"`
+	SourceKind  string `gorm:"not null;default:video_note"`
+	ID          uint   `gorm:"primaryKey"`
 	UserID      int64
 	Duration    int
 	IsPaid      bool
@@ -52,6 +54,7 @@ type VideoLog struct {
 
 // Stats хранит агрегированную статистику
 type Stats struct {
+	TotalPlainCircles    int  `gorm:"default:0"`
 	ID                   uint `gorm:"primaryKey"`
 	TotalFreeVideos      int  // Бесплатные кружочки
 	TotalPaidVideos      int  // Оплаченные видео
@@ -85,7 +88,7 @@ func New(dbPath string) (*DB, error) {
 	}
 
 	// Автомиграция
-	if err := db.AutoMigrate(&User{}, &VideoLog{}, &Stats{}, &PaymentOrder{}, &CreditTransaction{}, &StartEvent{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &VideoLog{}, &Stats{}, &PaymentOrder{}, &CreditTransaction{}, &StartEvent{}, &PlainConversion{}); err != nil {
 		return nil, err
 	}
 
@@ -145,6 +148,7 @@ func (d *DB) GetCreditTransactions(telegramID int64, limit int) ([]CreditTransac
 
 // FullStats расширенная статистика для админа
 type FullStats struct {
+	PlainCircles int
 	// По пользователям
 	TotalUsers      int64
 	UsersNoVideos   int64
@@ -201,6 +205,7 @@ func (d *DB) GetFullStats() (*FullStats, error) {
 	var stats Stats
 	if err := d.First(&stats).Error; err == nil {
 		result.VideoNotes = stats.TotalVideoNotes
+		result.PlainCircles = stats.TotalPlainCircles
 		result.FreeVideos = stats.TotalFreeVideos
 		result.PaymentRequests = stats.TotalPaymentRequests
 		result.PaidVideos = stats.TotalPaidVideos
@@ -269,7 +274,7 @@ func (d *DB) ReserveNote(userID int64, limit, cost int, admin bool) (free bool, 
 				u.FreeVideoNotesUsed++
 			} else {
 				if u.Credits < int64(cost) {
-					return fmt.Errorf("insufficient credits")
+					return ErrInsufficientCredits
 				}
 				u.Credits -= int64(cost)
 				if e := tx.Create(&CreditTransaction{UserID: userID, Amount: -int64(cost), Type: "spend", Description: "Video note", BalanceAfter: u.Credits}).Error; e != nil {
@@ -305,16 +310,7 @@ func (d *DB) RefundNote(userID int64, free bool, cost int, admin bool) error {
 	})
 }
 func (d *DB) LogNote(userID int64, duration int, fileID string, free bool) error {
-	return d.Transaction(func(tx *gorm.DB) error {
-		if e := tx.Create(&VideoLog{UserID: userID, Duration: duration, VideoFileID: fileID, IsPaid: !free}).Error; e != nil {
-			return e
-		}
-		field := "total_paid_videos"
-		if free {
-			field = "total_free_videos"
-		}
-		return tx.Model(&Stats{}).Where("id = 1").Updates(map[string]interface{}{"total_video_notes": gorm.Expr("total_video_notes + 1"), field: gorm.Expr(field + " + 1")}).Error
-	})
+	return d.LogVideoResult(userID, duration, fileID, "captioned_note", "video_note", free)
 }
 func (d *DB) CreateOrder(p PaymentOrder) error { return d.Create(&p).Error }
 func (d *DB) GetOrder(payload string) (*PaymentOrder, error) {

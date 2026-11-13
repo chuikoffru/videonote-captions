@@ -20,10 +20,11 @@ type StartEvent struct {
 
 // SourceStats contains aggregate conversion counts, without user identifiers.
 type SourceStats struct {
-	Source    string
-	Users     int64
-	Activated int64
-	PaidUsers int64
+	Source           string
+	Users            int64
+	Activated        int64
+	CaptionActivated int64
+	PaidUsers        int64
 }
 
 // RecordStart serializes attribution with billing and quota writes on the user.
@@ -84,6 +85,7 @@ func (d *DB) GetSourceStats() ([]SourceStats, error) {
 	err := d.Raw(`SELECT COALESCE(NULLIF(u.first_source, ''), 'unknown') AS source,
  COUNT(*) AS users,
  COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM video_logs v WHERE v.user_id = u.telegram_id AND v.video_file_id <> '' AND (u.first_started_at IS NULL OR v.created_at >= u.first_started_at))) AS activated,
+ COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM video_logs v WHERE v.user_id = u.telegram_id AND v.video_file_id <> '' AND COALESCE(NULLIF(v.operation, ''), 'captioned_note') = 'captioned_note' AND (u.first_started_at IS NULL OR v.created_at >= u.first_started_at))) AS caption_activated,
  COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM credit_transactions c WHERE c.user_id = u.telegram_id AND c.type = 'purchase' AND c.amount > 0 AND (u.first_started_at IS NULL OR c.created_at >= u.first_started_at))) AS paid_users
  FROM users u GROUP BY COALESCE(NULLIF(u.first_source, ''), 'unknown') ORDER BY users DESC, source`).Scan(&stats).Error
 	return stats, err

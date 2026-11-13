@@ -35,3 +35,6 @@ func Init(proxyURL string) error {
 func Get(rawURL string) (*http.Response, error) {
 	return shared.Get(rawURL)
 }
+
+// Client is configured once at startup, including the Telegram download proxy.
+func Client() *http.Client { return shared }
