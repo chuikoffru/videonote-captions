@@ -17,6 +17,13 @@ import (
 func loadConfig() (landing.Config, string) {
 	c := landing.Config{BaseURL: os.Getenv("BASE_URL"), BotUsername: os.Getenv("BOT_USERNAME"), FreeNotes: 3, NoteCredits: 10, Packages: [3]landing.Package{{Credits: 100, PriceRub: 99}, {Credits: 300, PriceRub: 249}, {Credits: 1000, PriceRub: 749}}}
 	c.Indexable, _ = strconv.ParseBool(os.Getenv("SITE_INDEXABLE"))
+	c.EnableVideoToCircle, _ = strconv.ParseBool(os.Getenv("ENABLE_VIDEO_TO_CIRCLE"))
+	c.PlainCirclesPerDay = number("PLAIN_CIRCLES_PER_DAY", 5, 1)
+	c.MaxInputVideoBytes = int64(number("MAX_INPUT_VIDEO_BYTES", 20971520, 1))
+	if c.MaxInputVideoBytes > 20971520 {
+		c.MaxInputVideoBytes = 20971520
+	}
+	c.MaxInputVideoSeconds = number("MAX_INPUT_VIDEO_SECONDS", 600, 1)
 	c.FreeNotes = number("FREE_VIDEO_NOTES_PER_MONTH", c.FreeNotes, 0)
 	c.NoteCredits = number("VIDEO_NOTE_CREDITS", c.NoteCredits, 1)
 	for i := range c.Packages {

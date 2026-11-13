@@ -116,6 +116,15 @@ func TestConvertCancelled(t *testing.T) {
 	}
 }
 
+func TestCircleOutputRejectsUnsupportedAudio(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "circle.mp4")
+	os.WriteFile(p, []byte("test"), 0600)
+	info := MediaInfo{Width: 384, Height: 384, DurationSeconds: 1, HasAudio: true, VideoCodec: "h264", PixelFormat: "yuv420p", AudioCodec: "opus", SampleAspectRatio: "1:1"}
+	if err := ValidateCircleOutput(p, info); err == nil {
+		t.Fatal("accepted non-AAC audio")
+	}
+}
+
 func TestConvertRotationAndCentre(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "stripes.mp4")
 	// A red centre with blue/green outer edges: central cropping must preserve red.
@@ -134,5 +143,20 @@ func TestConvertRotationAndCentre(t *testing.T) {
 	pixels, err := exec.Command("ffmpeg", "-v", "error", "-i", dst, "-frames:v", "1", "-vf", "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-").Output()
 	if err != nil || len(pixels) != 3 || pixels[0] < 180 || pixels[1] > 50 || pixels[2] > 50 {
 		t.Fatalf("centre not red: %v %v", pixels, err)
+	}
+}
+
+func TestProbeRecognizesHDRTransfer(t *testing.T) {
+	src := mediaFixture(t, "192x192", false)
+	hdr := filepath.Join(t.TempDir(), "hdr.mp4")
+	if out, err := exec.Command("ffmpeg", "-v", "error", "-i", src, "-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-x265-params", "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:pools=1:frame-threads=1", hdr).CombinedOutput(); err != nil {
+		t.Fatalf("HDR fixture %v %s", err, out)
+	}
+	info, err := Probe(context.Background(), hdr)
+	if err != nil || !info.IsHDR {
+		t.Fatalf("HDR metadata ignored %+v %v", info, err)
+	}
+	if err = ValidateInput(info, 600); err == nil {
+		t.Fatal("HDR accepted")
 	}
 }

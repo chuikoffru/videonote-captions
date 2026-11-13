@@ -40,6 +40,9 @@ func (h *Handler) StartHandler(ctx context.Context, b *bot.Bot, update *models.U
 	}
 
 	welcome := tr(lang, "👋 Отправь кружочек — я добавлю субтитры: одно слово в момент его произнесения. /help — условия, /buy — баланс и кредиты.")
+	if h.Config.EnableVideoToCircle {
+		welcome += "\n\n" + fmt.Sprintf(tr(lang, "Или пришлите обычное видео: сделаю кружочек без субтитров — бесплатно, до %d в день — либо с субтитрами по текущим условиям."), h.Config.PlainCirclesPerDay)
+	}
 	if lang == "ru" {
 		welcome += " /language ru|en — язык."
 	}
@@ -63,6 +66,9 @@ func (h *Handler) HelpHandler(ctx context.Context, b *bot.Bot, update *models.Up
 
 	if lang == "ru" {
 		helpText += "\n\nСубтитры остаются на языке речи. /language ru|en — язык интерфейса."
+	}
+	if h.Config.EnableVideoToCircle {
+		helpText += "\n\n" + fmt.Sprintf(tr(lang, "Обычное видео → кружочек: бесплатно до %d в день, обновление в полночь по Москве. Это отдельный лимит: месячные субтитры не расходуются.\nПришлите видео из галереи или файлом, выберите вариант с субтитрами или без. Обрезается центр кадра. Готовый кружочек — до 60 секунд; перед обрезкой длинного видео попрошу подтверждение. HDR нужно экспортировать в SDR.\n"), h.Config.PlainCirclesPerDay) + h.inputLimits(lang)
 	}
 	_, err := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    update.Message.Chat.ID,
@@ -195,6 +201,7 @@ func (h *Handler) UsageHandler(ctx context.Context, b *bot.Bot, update *models.U
 	}
 
 	usageText := fmt.Sprintf(tr(lang, "📊 Статистика\nПользователей: %d\nБез видео: %d\nОдно видео: %d\nБольше одного: %d\nКружочков: %d\nБесплатных: %d\nПлатных: %d\nСумма балансов: %d кредитов\nПотрачено: %d кредитов"), stats.TotalUsers, stats.UsersNoVideos, stats.UsersOneVideo, stats.UsersMoreVideos, stats.VideoNotes, stats.FreeVideos, stats.PaidVideos, stats.TotalBalances, stats.TotalSpent)
+	usageText += "\n\n" + fmt.Sprintf(tr(lang, "Без субтитров: %d\nС субтитрами: %d (бесплатных %d, платных %d)"), stats.PlainCircles, stats.FreeVideos+stats.PaidVideos, stats.FreeVideos, stats.PaidVideos)
 
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    update.Message.Chat.ID,

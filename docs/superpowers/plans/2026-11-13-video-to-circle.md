@@ -1,6 +1,6 @@
 # Video to Circle Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. This is a proposed plan; this request authorizes research and planning, not implementation.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Implementation was authorized on 2026-11-13.
 
 **Goal:** Принимать обычное видео и возвращать кружочек Telegram без субтитров либо с существующими пословными субтитрами.
 
@@ -10,7 +10,7 @@
 
 **Spec:** [Исследование и проект решения](../specs/2026-11-13-video-to-circle-design.md).
 
-**Status:** Оба режима подтверждены пользователем. Бесплатный лимит, кроп по центру и порядок работы с длинными видео пока предложены автором плана.
+**Status:** Пользователь согласовал реализацию по плану: оба режима, простая конвертация бесплатно до 5 в день, субтитры по текущим условиям. Деплой и приёмка реальными Telegram-клиентами выполняются отдельно.
 
 ## Global Constraints
 

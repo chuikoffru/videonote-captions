@@ -60,5 +60,8 @@ func ValidateCircleOutput(path string, info MediaInfo) error {
 	if info.VideoCodec != "h264" || info.PixelFormat != "yuv420p" {
 		return errors.New("incompatible circle encoding")
 	}
+	if info.HasAudio && info.AudioCodec != "aac" {
+		return errors.New("incompatible circle audio")
+	}
 	return nil
 }

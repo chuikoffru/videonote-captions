@@ -20,6 +20,10 @@ var username = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{4,31}$`)
 
 type Package struct{ Credits, PriceRub int }
 type Config struct {
+	EnableVideoToCircle    bool
+	PlainCirclesPerDay     int
+	MaxInputVideoBytes     int64
+	MaxInputVideoSeconds   int
 	BaseURL, BotUsername   string
 	Indexable              bool
 	FreeNotes, NoteCredits int
@@ -36,9 +40,19 @@ type page struct {
 	HeroLink, FooterLink, SecondaryLink                                                                   string
 	Kind, LegalTitle                                                                                      string
 	Legal                                                                                                 []item
+	ConversionTitle, ConversionIntro, ConversionTerms, ConversionCTA, ConversionLink                      string
 }
 
 func normalized(c Config) Config {
+	if c.PlainCirclesPerDay <= 0 {
+		c.PlainCirclesPerDay = 5
+	}
+	if c.MaxInputVideoBytes <= 0 || c.MaxInputVideoBytes > 20971520 {
+		c.MaxInputVideoBytes = 20971520
+	}
+	if c.MaxInputVideoSeconds <= 0 {
+		c.MaxInputVideoSeconds = 600
+	}
 	u, err := url.Parse(c.BaseURL)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || strings.ContainsAny(u.Host, "<>\" ") {
 		c.BaseURL = ""
@@ -158,6 +172,9 @@ func NewHandler(c Config) http.Handler {
 		}
 		if kind == "legal" {
 			legalCopy(&p, suffix)
+			if c.EnableVideoToCircle {
+				conversionLegal(&p, suffix)
+			}
 			p.Title = p.LegalTitle + " · Video Note Captions"
 			p.Description = p.LegalTitle + " — Video Note Captions"
 		}
@@ -203,6 +220,9 @@ func localized(c Config, lang string) page {
 		p.HeroLink = "https://t.me/" + c.BotUsername + "?start=" + lang + "_home_hero"
 		p.FooterLink = "https://t.me/" + c.BotUsername + "?start=" + lang + "_home_footer"
 		p.SecondaryLink = "https://t.me/" + c.BotUsername + "?start=" + lang + "_home_pricing"
+	}
+	if c.EnableVideoToCircle {
+		conversionCopy(&p)
 	}
 	return p
 }

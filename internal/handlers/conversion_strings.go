@@ -1,0 +1,27 @@
+package handlers
+
+var conversionEnglish = map[string]string{
+	"Без субтитров: %d\nС субтитрами: %d (бесплатных %d, платных %d)":                                                              "Without captions: %d\nWith captions: %d (%d free, %d paid)",
+	"Или пришлите обычное видео: сделаю кружочек без субтитров — бесплатно, до %d в день — либо с субтитрами по текущим условиям.": "Or send a regular video: I can make a circle without captions, free up to %d a day, or add captions on the current terms.",
+	"Обычное видео → кружочек: бесплатно до %d в день, обновление в полночь по Москве. Это отдельный лимит: месячные субтитры не расходуются.\nПришлите видео из галереи или файлом, выберите вариант с субтитрами или без. Обрезается центр кадра. Готовый кружочек — до 60 секунд; перед обрезкой длинного видео попрошу подтверждение. HDR нужно экспортировать в SDR.\n": "Regular video → circle: free up to %d a day, resetting at midnight Moscow time. This is separate from the monthly caption allowance.\nSend a video from the gallery or as a file, then choose with or without captions. The centre is cropped. The result is up to 60 seconds; I will ask before trimming a longer video. Export HDR in SDR first.\n",
+	"Пришлите видео в личный чат с ботом.":                            "Send the video in a private chat with the bot.",
+	"Сервис временно недоступен. Попробуйте позже.":                   "The service is temporarily unavailable. Please try again later.",
+	"Слишком много открытых меню. Завершите или отмените предыдущие.": "Too many open menus. Finish or cancel previous ones first.",
+	"Выберите результат. Обрежу центр кадра в квадрат.\n\nБез субтитров: бесплатно, до %d кружочков в день (Москва).\nС субтитрами: %d бесплатно в месяц, далее %d кредитов.\nМеню действует 30 минут.": "Choose the result. I will crop the centre of the frame to a square.\n\nWithout captions: free, up to %d circles a day (Moscow time).\nWith captions: %d free a month, then %d credits.\nThis menu expires in 30 minutes.",
+	"Видео длиннее минуты. Перед обрезкой первых 60 секунд попрошу подтверждение.":                                                                                                                      "This video is longer than a minute. I will ask before using the first 60 seconds.",
+	"⭕ Сделать кружочек":      "⭕ Make a circle",
+	"💬 Кружочек с субтитрами": "💬 Circle with captions",
+	"Отмена":    "Cancel",
+	"Отменено.": "Cancelled.",
+	"Использовать первые 60 секунд":                                                                                         "Use the first 60 seconds",
+	"Видео длиннее минуты. Использовать первые 60 секунд?":                                                                  "This video is longer than a minute. Use the first 60 seconds?",
+	"Меню недоступно. Пришлите видео заново.":                                                                               "This menu is unavailable. Send the video again.",
+	"Пришлите видео до %d MB и не длиннее %d секунд.":                                                                       "Send a video up to %d MB and no longer than %d seconds.",
+	"Можно сделать кружочек без субтитров. Он использует отдельный бесплатный дневной лимит.":                               "You can make a circle without captions using the separate free daily allowance.",
+	"Не удалось обработать видео. Лимит и кредиты не расходуются. Пришлите видео заново.":                                   "Could not process the video. Your allowance and credits are not used. Send the video again.",
+	"Это HDR-видео. Экспортируйте его в SDR и пришлите снова. Лимит и кредиты не расходуются.":                              "This is an HDR video. Export it in SDR and send it again. Your allowance and credits are not used.",
+	"В видео нет звука или распознаваемой речи. Субтитры не созданы, лимит и кредиты не расходуются.":                       "No audio or recognizable speech was found. No captions were created; your allowance and credits are not used.",
+	"Дневной лимит бесплатных кружочков исчерпан. Он обновится в полночь по Москве. Субтитры доступны по текущим условиям.": "Your daily free circle allowance is used up. It resets at midnight Moscow time. Captions remain available on the current terms.",
+	"Недостаточно кредитов для субтитров. Используйте /buy или выберите кружочек без субтитров.":                            "Not enough credits for captions. Use /buy or choose a circle without captions.",
+	"🎬 Готовлю кружочек...": "🎬 Preparing your circle...",
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -13,6 +14,8 @@ import (
 )
 
 // Word представляет слово с временными метками
+var ErrNoSpeech = errors.New("no word timestamps returned")
+
 type Word struct {
 	Word  string
 	Start float64
@@ -85,7 +88,7 @@ func (s *Service) TranscribeAudio(ctx context.Context, audioPath string) (*Resul
 	}
 
 	if len(result.Words) == 0 {
-		return nil, fmt.Errorf("no word timestamps returned")
+		return nil, ErrNoSpeech
 	}
 	return result, nil
 }
