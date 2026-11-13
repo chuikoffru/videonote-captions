@@ -33,3 +33,14 @@ func TestInvalidConfigValuesKeepSafeDefaults(t *testing.T) {
 		t.Fatalf("invalid: %+v %s", c, p)
 	}
 }
+
+func TestVideoConversionPublicSettings(t *testing.T) {
+	t.Setenv("ENABLE_VIDEO_TO_CIRCLE", "true")
+	t.Setenv("PLAIN_CIRCLES_PER_DAY", "5")
+	t.Setenv("MAX_INPUT_VIDEO_BYTES", "10485760")
+	t.Setenv("MAX_INPUT_VIDEO_SECONDS", "300")
+	c, _ := loadConfig()
+	if !c.EnableVideoToCircle || c.PlainCirclesPerDay != 5 || c.MaxInputVideoBytes != 10485760 || c.MaxInputVideoSeconds != 300 {
+		t.Fatalf("public settings: %+v", c)
+	}
+}

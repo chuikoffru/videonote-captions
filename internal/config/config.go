@@ -6,10 +6,15 @@ import (
 )
 
 type Config struct {
-	BotToken     string
-	OpenAIAPIKey string
-	Proxy        string
-	YuKassaToken string // provider_token для ЮКасса
+	EnableVideoToCircle        bool
+	PlainCirclesPerDay         int
+	MaxInputVideoBytes         int64
+	MaxInputVideoSeconds       int
+	VideoProcessTimeoutSeconds int
+	BotToken                   string
+	OpenAIAPIKey               string
+	Proxy                      string
+	YuKassaToken               string // provider_token для ЮКасса
 
 	DatabaseURL            string
 	AdminID                int64 // Telegram ID администратора (без лимитов)
@@ -39,6 +44,14 @@ func Load() *Config {
 		CreditPackage3Amount: 1000, // 1000 кредитов
 		CreditPackage3Price:  749,  // 749 рублей
 	}
+	cfg.EnableVideoToCircle, _ = strconv.ParseBool(os.Getenv("ENABLE_VIDEO_TO_CIRCLE"))
+	cfg.PlainCirclesPerDay = positive("PLAIN_CIRCLES_PER_DAY", 5)
+	cfg.MaxInputVideoBytes = int64(positive("MAX_INPUT_VIDEO_BYTES", 20971520))
+	if cfg.MaxInputVideoBytes > 20971520 {
+		cfg.MaxInputVideoBytes = 20971520
+	}
+	cfg.MaxInputVideoSeconds = positive("MAX_INPUT_VIDEO_SECONDS", 600)
+	cfg.VideoProcessTimeoutSeconds = positive("VIDEO_PROCESS_TIMEOUT_SECONDS", 180)
 
 	if adminID, err := strconv.ParseInt(os.Getenv("ADMIN_ID"), 10, 64); err == nil && adminID > 0 {
 		cfg.AdminID = adminID
@@ -75,4 +88,12 @@ func Load() *Config {
 	}
 
 	return cfg
+}
+
+func positive(key string, fallback int) int {
+	v, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }

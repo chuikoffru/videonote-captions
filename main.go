@@ -94,6 +94,10 @@ func main() {
 				h.VideoNoteHandler(ctx, b, update)
 				return
 			}
+			if cfg.EnableVideoToCircle && handlers.AcceptsVideo(update.Message) {
+				h.VideoHandler(ctx, b, update)
+				return
+			}
 
 			// Обрабатываем успешный платёж (только кредиты через ЮКасса)
 			if update.Message != nil && update.Message.SuccessfulPayment != nil {
@@ -109,6 +113,10 @@ func main() {
 
 			// Обрабатываем нажатия на кнопки (CallbackQuery)
 			if update.CallbackQuery != nil {
+				if strings.HasPrefix(update.CallbackQuery.Data, "circle:") {
+					h.CircleCallbackHandler(ctx, b, update)
+					return
+				}
 				if strings.HasPrefix(update.CallbackQuery.Data, "buy:") {
 					h.BuyCallbackHandler(ctx, b, update)
 					return

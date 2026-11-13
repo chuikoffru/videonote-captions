@@ -1,6 +1,7 @@
 package video
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -14,8 +15,18 @@ import (
 
 // AddSubtitlesToVideoNote накладывает субтитры по одному слову на Video Note
 func AddSubtitlesToVideoNote(videoPath string, transcriptionResult *transcription.Result) (string, error) {
+	return AddSubtitlesToVideoNoteContext(context.Background(), videoPath, transcriptionResult)
+}
+
+func AddSubtitlesToVideoNoteContext(ctx context.Context, videoPath string, transcriptionResult *transcription.Result) (string, error) {
 	tempDir := filepath.Dir(videoPath)
 	outputPath := filepath.Join(tempDir, fmt.Sprintf("captioned_videonote_%d.mp4", time.Now().UnixNano()))
+	complete := false
+	defer func() {
+		if !complete {
+			os.Remove(outputPath)
+		}
+	}()
 
 	// Создаём ASS файл субтитров
 	assPath, err := createWordASS(transcriptionResult, tempDir)
@@ -31,12 +42,14 @@ func AddSubtitlesToVideoNote(videoPath string, transcriptionResult *transcriptio
 	// Используем subtitles фильтр с указанием ASS файла
 	// Video Note в Telegram имеет размер до 384x384 (или 640x640), поэтому шрифт подбираем среднего размера
 	// Важно: Сохраняем кодек H.264 и формат пикселей yuv420p для совместимости
-	cmd := exec.Command("ffmpeg",
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-v", "error", "-nostdin",
 		"-i", videoPath,
 		"-vf", fmt.Sprintf("subtitles='%s'", escapedASSPath),
 		"-c:v", "libx264",
+		"-threads", "2",
 		"-preset", "medium",
 		"-crf", "23",
+		"-maxrate", "900k", "-bufsize", "1800k",
 		"-pix_fmt", "yuv420p",
 		"-movflags", "+faststart",
 		"-c:a", "copy", // Аудио оставляем без изменений
@@ -49,6 +62,7 @@ func AddSubtitlesToVideoNote(videoPath string, transcriptionResult *transcriptio
 		return "", fmt.Errorf("ffmpeg error: %v, output: %s", err, string(output))
 	}
 
+	complete = true
 	return outputPath, nil
 }
 

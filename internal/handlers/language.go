@@ -89,12 +89,12 @@ func (h *Handler) SourcesHandler(ctx context.Context, b *bot.Bot, update *models
 			log.Printf("Source stats: %v", err)
 			text = tr(lang, "❌ Ошибка получения статистики.")
 		} else {
-			text = "📊 Источники первого запуска\nПользователи / с видео / с оплатой\n"
+			text = "📊 Источники первого запуска\nПользователи / с видео / с субтитрами / с оплатой\n"
 			if lang == "en" {
-				text = "📊 First-start sources\nUsers / activated / paid users\n"
+				text = "📊 First-start sources\nUsers / activated / captions / paid users\n"
 			}
 			for _, row := range stats {
-				text += fmt.Sprintf("\n%s: %d / %d / %d", row.Source, row.Users, row.Activated, row.PaidUsers)
+				text += fmt.Sprintf("\n%s: %d / %d / %d / %d", row.Source, row.Users, row.Activated, row.CaptionActivated, row.PaidUsers)
 			}
 		}
 	}

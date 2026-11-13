@@ -55,6 +55,9 @@ func tr(lang, text string) string {
 		if translated, ok := english[text]; ok {
 			return translated
 		}
+		if translated, ok := conversionEnglish[text]; ok {
+			return translated
+		}
 	}
 	return text
 }
