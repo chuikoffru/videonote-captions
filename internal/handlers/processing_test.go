@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"videonote-captions/internal/config"
 	"videonote-captions/internal/database"
 	"videonote-captions/internal/transcription"
@@ -209,5 +210,48 @@ func TestDailyLimitStillAllowsCaptionSelection(t *testing.T) {
 	h.processVideo(context.Background(), testBot, p.Request)
 	if _, err := h.pending.Select(token, 7, 7, "captions"); err != nil {
 		t.Fatal("daily quota prevented choosing captions", err)
+	}
+}
+
+func TestTimeoutSendsTerminalStatusAndRefunds(t *testing.T) {
+	h, billing, _, _, _ := processingHarness(t, "ok")
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.media.Convert = func(ctx context.Context, _, _ string, _ video.CircleOptions) error {
+		cancel()
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	terminal := false
+	b, err := bot.New("1:test", bot.WithSkipGetMe(), bot.WithHTTPClient(0, &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if err := r.Context().Err(); err != nil {
+			return nil, err
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasSuffix(r.URL.Path, "/editMessageText") && strings.Contains(r.FormValue("text"), "Не удалось обработать") {
+			terminal = true
+			deadline, ok := r.Context().Deadline()
+			if !ok || time.Until(deadline) > 6*time.Second {
+				t.Fatal("terminal context is not bounded")
+			}
+		}
+		body := `{"ok":true,"result":{"message_id":1,"chat":{"id":7,"type":"private"}}}`
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.processVideo(parent, b, ProcessingRequest{OwnerID: 7, ChatID: 7, FileID: "input", SourceKind: "video", Mode: "plain"})
+	if !terminal {
+		t.Fatal("terminal status was lost after context cancellation")
+	}
+	if billing.finished != 1 || billing.delivered || len(h.slots) != 0 {
+		t.Fatalf("reservation or slot not released %+v", billing)
+	}
+	entries, _ := os.ReadDir(h.tempRoot)
+	if len(entries) != 0 {
+		t.Fatal("temporary files leaked")
 	}
 }

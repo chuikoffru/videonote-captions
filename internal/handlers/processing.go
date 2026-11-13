@@ -72,7 +72,13 @@ func (h *Handler) processVideo(parent context.Context, b *bot.Bot, job Processin
 	}
 	update := func(text string) { h.updateStatus(ctx, b, job.ChatID, status.ID, tr(job.Language, text)) }
 	fail := func() {
-		update("Не удалось обработать видео. Лимит и кредиты не расходуются. Пришлите видео заново.")
+		// Processing may have exhausted its deadline. Keep the terminal notification bounded
+		// without inheriting cancellation, so the user does not see a permanent progress state.
+		notifyCtx, notifyCancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+		defer notifyCancel()
+		if _, err := b.EditMessageText(notifyCtx, &bot.EditMessageTextParams{ChatID: job.ChatID, MessageID: status.ID, Text: tr(job.Language, "Не удалось обработать видео. Лимит и кредиты не расходуются. Пришлите видео заново.")}); err != nil {
+			log.Printf("video_processing mode=%s stage=terminal_status outcome=error", job.Mode)
+		}
 	}
 	if h.billing == nil {
 		fail()
